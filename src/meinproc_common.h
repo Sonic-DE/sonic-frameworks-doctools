@@ -1,6 +1,5 @@
 
-#ifndef MEINPROC_COMMON_H
-#define MEINPROC_COMMON_H
+#pragma once
 
 #include <QString>
 
@@ -28,5 +27,3 @@ void doOutput(QString output, bool usingStdOut, bool usingOutput, const QString 
 #include <windows.h>
 #define setenv(x, y, z) SetEnvironmentVariable((LPCTSTR)x, (LPCTSTR)y)
 #endif // _WIN32
-
-#endif

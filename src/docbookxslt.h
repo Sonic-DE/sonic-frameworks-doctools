@@ -11,8 +11,7 @@
     SPDX-License-Identifier: LGPL-2.1-or-later
 */
 
-#ifndef _KDOCTOOLS_XSLT_H_
-#define _KDOCTOOLS_XSLT_H_
+#pragma once
 
 #include <QStandardPaths>
 #include <QVector>
@@ -63,5 +62,3 @@ KDOCTOOLS_EXPORT QString locateFileInDtdResource(const QString &file, const QSta
 KDOCTOOLS_EXPORT QStringList documentationDirs();
 
 }
-
-#endif
