@@ -24,6 +24,7 @@
 <!ENTITY kde-sc-full	"<productname>&kde; Software Compilation</productname>">
 <!ENTITY kf5	"<acronym>KF5</acronym>">
 <!ENTITY kf5-full	"&kde-frameworks; <productnumber>5</productnumber>">
+<!ENTITY kf6-full	"&kde-frameworks; <productnumber>6</productnumber>">
 <!ENTITY kmenu  "<guimenu>K</guimenu> 菜单">
 <!ENTITY LMB    "鼠标<mousebutton>左</mousebutton>键">
 <!ENTITY MMB    "鼠标<mousebutton>中</mousebutton>键">

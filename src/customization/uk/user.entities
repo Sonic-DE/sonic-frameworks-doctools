@@ -30,8 +30,8 @@
 <!ENTITY kde-sc-full	"<productname>&kde; Software Compilation</productname>">
 <!ENTITY kf5	"<acronym>KF5</acronym>">
 <!ENTITY kf5-full	"&kde-frameworks; <productnumber>5</productnumber>">
+<!ENTITY kf6-full	"&kde-frameworks; <productnumber>6</productnumber>">
 <!ENTITY kmenu  "<guimenu>K-меню</guimenu>">
-<!ENTITY kf5-full	"&kde-frameworks; <productnumber>5</productnumber>">
 <!ENTITY Left	"<keysym>←</keysym>">
 <!ENTITY LMB    "<mousebutton>ліва</mousebutton> кнопка мишки">
 <!ENTITY Meta	"<keysym>Meta</keysym>"> <!-- Super key or Windows key -->

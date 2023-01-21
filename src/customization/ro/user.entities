@@ -35,6 +35,7 @@
 <!ENTITY kde-sc-full	"<productname>&kde; Software Compilation</productname>">
 <!ENTITY kf5	"<acronym>KF5</acronym>">
 <!ENTITY kf5-full	"&kde-frameworks; <productnumber>5</productnumber>">
+<!ENTITY kf6-full	"&kde-frameworks; <productnumber>6</productnumber>">
 <!ENTITY kinfocenter            '<application>Centrul de Informaţii &kde;</application>'>
 <!ENTITY khelpcenter            '<application>Centrul de Ajutor &kde;</application>'>
 <!ENTITY plasma-active	"<productname>&kde; Plasma Active</productname>">

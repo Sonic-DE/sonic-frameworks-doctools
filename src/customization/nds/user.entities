@@ -40,6 +40,7 @@
 <!ENTITY kde-sc-full	"<productname>&kde; Software Compilation</productname>">
 <!ENTITY kf5	"<acronym>KF5</acronym>">
 <!ENTITY kf5-full	"&kde-frameworks; <productnumber>5</productnumber>">
+<!ENTITY kf6-full	"&kde-frameworks; <productnumber>6</productnumber>">
 <!ENTITY khelpcenter-de "<application>&kde;-H&#252;lpzentrum</application>" >
 <!ENTITY kmenu  "<guimenu>K</guimenu>-Men&#252;"> <!-- kmenu -->
 <!ENTITY kwm    "<application>kwm</application>">
