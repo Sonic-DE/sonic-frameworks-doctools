@@ -59,6 +59,7 @@
 #
 #  KDOCTOOLS_MEINPROC_EXECUTABLE - the meinproc6 executable
 #
+cmake_minimum_required(VERSION 3.16)
 
 set(KDOCTOOLS_SERIALIZE_TOOL "" CACHE STRING "Tool to serialize resource-intensive commands in parallel builds")
 set(KDOCTOOLS_MEINPROC_EXECUTABLE "KF6::meinproc6")
