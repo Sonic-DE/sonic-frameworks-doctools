@@ -1,4 +1,4 @@
-# KDocTools
+# sonic-doctools
 
 Create documentation from DocBook
 
