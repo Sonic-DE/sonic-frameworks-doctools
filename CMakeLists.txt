@@ -96,7 +96,15 @@ else ()
 endif ()
 include(KF6DocToolsMacros.cmake)
 
-set(KDOCTOOLS_LANGUAGES_LIST af ar bg ca ca@valencia cs da de el en-GB en eo es et fi fo fr gl he hu id it ja ko lt nds nl nn no pl pt-BR pt ro ru sk sl sq sr sr@latin sr@ijekavian sr@ijekavianlatin sv th tr uk wa xh xx zh-CN zh-TW)
+# dynamically retrieve the list of languages to install
+file(GLOB KDOCTOOLS_LANGUAGES_FOLDER_LIST RELATIVE ${CMAKE_SOURCE_DIR} CONFIGURE_DEPENDS "src/customization/*")
+foreach(item ${KDOCTOOLS_LANGUAGES_FOLDER_LIST})
+    if(IS_DIRECTORY ${CMAKE_SOURCE_DIR}/${item})
+        list(APPEND KDOCTOOLS_LANGUAGES_LIST ${item})
+    endif()
+endforeach()
+list(TRANSFORM KDOCTOOLS_LANGUAGES_LIST REPLACE "src/customization/" "")
+list(REMOVE_ITEM KDOCTOOLS_LANGUAGES_LIST "dtd" "entities" "xsl")
 
 set(CMAKECONFIG_INSTALL_DIR "${KDE_INSTALL_CMAKEPACKAGEDIR}/KF6DocTools")
 add_definitions(-DTRANSLATION_DOMAIN=\"kdoctools6\")
