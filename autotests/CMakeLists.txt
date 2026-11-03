@@ -4,7 +4,7 @@ add_test(
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-set(CTEST_ENVIRONMENT "QT_LOGGING_RULES=kf.doctools.core=true")
+set(CTEST_ENVIRONMENT "QT_LOGGING_RULES=org.sonicde.frameworks.doctools*=true")
 
 if (TARGET Qt6::Core)
     set(QT_VERSION_OPT "-DBUILD_WITH_QT6=ON")

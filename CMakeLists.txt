@@ -21,7 +21,6 @@ include(KDEFrameworkCompilerSettings NO_POLICY_SCOPE)
 include(KDEGitCommitHooks)
 include(ECMSetupVersion)
 include(ECMMarkNonGuiExecutable)
-include(ECMQtDeclareLoggingCategory)
 include(ECMDeprecationSettings)
 include(CMakePackageConfigHelpers)
 include(ECMGenerateExportHeader)
@@ -52,6 +51,9 @@ if (NOT MEINPROC_NO_KARCHIVE)
 else()
    message(WARNING "KArchive dependency has been disabled. This should be done only for internal usage on KDE infrastructure.")
 endif()
+
+# SonicDE logging: every doctools library and program logs through Sonic::Logging
+find_package(SonicLogging ${KF_VERSION} CONFIG REQUIRED)
 
 find_package(KF6I18n ${KF_DEP_VERSION})
 set_package_properties(KF6I18n PROPERTIES TYPE OPTIONAL

@@ -5,8 +5,6 @@
     SPDX-License-Identifier: LGPL-2.1-only OR LGPL-3.0-only OR LicenseRef-KDE-Accepted-LGPL
 */
 
-#include "loggingcategory.h"
-
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -16,6 +14,10 @@
 #include <QRegularExpression>
 #include <QStringList>
 #include <QTextStream>
+
+#include <Sonic/Logging/Logging>
+
+SONIC_LOGGING_COMPONENT("org.sonicde.frameworks.doctools.docbookl10nhelper");
 
 class LangListType : public QList<QPair<QString, QString>>
 {
@@ -35,7 +37,7 @@ int writeLangFile(const QString &fname, const QString &dtdPath, const LangListTy
 {
     QFile outFile(fname);
     if (!outFile.open(QIODevice::WriteOnly)) {
-        qCCritical(KDocToolsLog) << QStringLiteral("Could not write %1").arg(outFile.fileName());
+        sonicCritical() << QStringLiteral("Could not write %1").arg(outFile.fileName());
         return (1);
     }
 
@@ -65,11 +67,15 @@ inline const QString addTrailingSlash(const QString &p)
 
 int main(int argc, char **argv)
 {
+    // Runs as a build step: no log file (root builds would write /var/log/sonic), so every line goes
+    // to stderr, where the build reads it, and to journald.
+    Sonic::Logging::install({.writeLogFile = false});
+
     QCoreApplication app(argc, argv);
 
     const QStringList arguments = app.arguments();
     if (arguments.count() != 4) {
-        qCCritical(KDocToolsLog) << "wrong argument count";
+        sonicCritical() << "wrong argument count";
         return (1);
     }
 
@@ -80,7 +86,7 @@ int main(int argc, char **argv)
     QFile i18nFile(l10nDir + QStringLiteral("common/l10n.xml"));
 
     if (!i18nFile.open(QIODevice::ReadOnly)) {
-        qCCritical(KDocToolsLog) << i18nFile.fileName() << " not found";
+        sonicCritical() << i18nFile.fileName() << " not found";
         return (1);
     }
 
@@ -102,7 +108,7 @@ int main(int argc, char **argv)
         case 0:
             if (rxDocType.match(line).hasMatch()) {
                 parsingState = 1;
-                // qCDebug(KDocToolsLog) << "DTD found";
+                // sonicDebug() << "DTD found";
             }
             break;
         case 1:
@@ -111,7 +117,7 @@ int main(int argc, char **argv)
                 const QString langCode = match.captured(1);
                 const QString langFile = l10nDir + QStringLiteral("common/") + match.captured(2);
                 allLangs += qMakePair(langCode, langFile);
-                // qCDebug(KDocToolsLog) << langCode << " - " << langFile;
+                // sonicDebug() << langCode << " - " << langFile;
             }
             break;
         }
@@ -130,7 +136,7 @@ int main(int argc, char **argv)
      */
     customLangFiles.removeOne(QStringLiteral("all-l10n.xml"));
     customLangFiles.removeOne(QStringLiteral("kde-custom-l10n.xml"));
-    // qCDebug(KDocToolsLog) << "customLangFiles:" << customLangFiles;
+    // sonicDebug() << "customLangFiles:" << customLangFiles;
 
     /*
      * for each custom language (from directory listing), if it is not
