@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Joseph Crowell <joseph.w.crowell@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Test fixture shaped like QDoc's DocBook output for a class page. -->
+<db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
+<db:info>
+<db:title>TestWatcher Class</db:title>
+<db:productname>Qt</db:productname>
+<db:edition>Qt 6.31.0 Reference Documentation</db:edition>
+<db:titleabbrev>Test module</db:titleabbrev>
+<db:abstract>
+<db:para>Watches a <db:link xlink:href="testconfig.xml">TestConfig</db:link> for changes.</db:para>
+</db:abstract>
+</db:info>
+<db:variablelist>
+<db:varlistentry>
+<db:term>Header</db:term>
+<db:listitem>
+<db:para>TestWatcher</db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>CMake</db:term>
+<db:listitem>
+<db:para>find_package(KF6 REQUIRED COMPONENTS Test)</db:para>
+<db:para>target_link_libraries(mytarget PRIVATE KF6::Test)</db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>Inherits</db:term>
+<db:listitem>
+<db:para><db:link xlink:href="../qtcore/qobject.html" xlink:role="class">QObject</db:link></db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>Inherited By</db:term>
+<db:listitem>
+<db:para/>
+</db:listitem>
+</db:varlistentry>
+</db:variablelist>
+<db:section xml:id="details">
+<db:title>Detailed Description</db:title>
+<db:para>The <db:link xlink:href="testwatcher.xml#changed">changed</db:link>() signal is emitted for <db:link xlink:href="../otherframework/othergroup.html#name">OtherGroup::name</db:link>, a <db:emphasis>very </db:emphasis>important event.</db:para>
+<db:programlisting language="cpp">auto watcher = TestWatcher::create(config);</db:programlisting>
+<db:note>
+<db:para>Set config sources first.</db:para>
+</db:note>
+<db:section>
+<db:title>See Also</db:title>
+<db:para><db:emphasis>See also </db:emphasis>
+<db:simplelist type="vert" role="see-also">
+<db:member><db:link xlink:href="testconfig.xml">TestConfig</db:link></db:member>
+<db:member><db:link xlink:href="https://example.org/spec">the specification</db:link></db:member>
+</db:simplelist>
+</db:para>
+</db:section>
+</db:section>
+<db:section xml:id="property-documentation">
+<db:title>Property Documentation</db:title>
+<db:section xml:id="interval-prop">
+<db:title>interval : int</db:title>
+<db:para>The watch interval.</db:para>
+</db:section>
+</db:section>
+<db:section xml:id="member-type-documentation">
+<db:title>Member Type Documentation</db:title>
+<db:section xml:id="Mode-enum">
+<db:title>enum TestWatcher::Mode</db:title>
+<db:bridgehead renderas="sect2">flags TestWatcher::Modes</db:bridgehead>
+<db:para>How to watch.</db:para>
+<db:informaltable>
+<db:thead>
+<db:tr>
+<db:th>Constant</db:th>
+<db:th>Value</db:th>
+<db:th>Description</db:th>
+</db:tr>
+</db:thead>
+<db:tr>
+<db:td>
+<db:para><db:code><db:emphasis role="bold"><db:link xlink:href="testwatcher.xml">TestWatcher</db:link></db:emphasis>::Polling</db:code></db:para>
+</db:td>
+<db:td><db:code>0x01</db:code></db:td>
+<db:td>
+<db:para>Poll the file.</db:para>
+</db:td>
+</db:tr>
+</db:informaltable>
+</db:section>
+</db:section>
+<db:section xml:id="member-function-documentation">
+<db:title>Member Function Documentation</db:title>
+<db:section xml:id="TestWatcher">
+<db:title>[explicit, since 6.23] TestWatcher::TestWatcher(const TestConfig &amp;config)</db:title>
+<db:para>Constructs a watcher.</db:para>
+</db:section>
+<db:section xml:id="config">
+<db:title>TestConfig TestWatcher::config() const</db:title>
+<db:para>Returns the config.</db:para>
+</db:section>
+<db:section xml:id="changed">
+<db:title>[signal] void TestWatcher::changed(const QByteArrayList &amp;names)</db:title>
+<db:para>Emitted when <db:code>names</db:code> change.</db:para>
+</db:section>
+<db:section xml:id="reload">
+<db:title>[slot] void TestWatcher::reload()</db:title>
+<db:para>Reloads the config. This function is <db:link xlink:href="">Q_INVOKABLE</db:link>.</db:para>
+</db:section>
+<db:section xml:id="create">
+<db:title>[static] TestWatcher *TestWatcher::create(const TestConfig &amp;config)</db:title>
+<db:para>Creates a watcher.</db:para>
+</db:section>
+</db:section>
+</db:article>

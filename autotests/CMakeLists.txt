@@ -34,3 +34,5 @@ add_test(kdoctools_install ${CMAKE_CTEST_COMMAND}
         "-DKDE_INSTALL_DOCBUNDLEDIR=${KDE_INSTALL_DOCBUNDLEDIR}"
         "-DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/kdoctools+install/destdir"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/kdoctools+install/test.cmake")
+
+add_subdirectory(docbook2markdown)

@@ -236,3 +236,7 @@ if(CMAKE_CROSSCOMPILING AND CHECKXML6_EXECUTABLE)
 else()
     add_executable(KF6::checkXML6 ALIAS checkXML6)
 endif()
+
+########### docbook2markdown6 (QDoc DocBook to Markdown) ###############
+
+add_subdirectory(docbook2markdown)
