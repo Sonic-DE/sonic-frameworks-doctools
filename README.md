@@ -21,9 +21,13 @@ publishes the SonicDE API reference on sonicde.org. Class pages keep the Qt refe
 2. Convert each module into the same output directory:
 
    ```sh
-   docbook2markdown6 --module kconfigcore <kconfigcore docbook dir> <output dir>
-   docbook2markdown6 --module kconfiggui <kconfiggui docbook dir> <output dir>
+   docbook2markdown6 --module kconfigcore --index <kconfigcore prepare dir>/kconfigcore.index <kconfigcore docbook dir> <output dir>
+   docbook2markdown6 --module kconfiggui --index <kconfiggui prepare dir>/kconfiggui.index <kconfiggui docbook dir> <output dir>
    ```
+
+   `--index` takes the module's `.index` file from the prepare step. QDoc's DocBook writer leaves
+   the pages of structs and unions untitled; the index gives their names, so they get Qt's
+   titles ("Foo::Bar Struct") and are linked from their namespace's or class's list.
 
    Each run writes `<output dir>/<module>/<page>.md` for every page, copies `images/`, and records
    the module in `<output dir>/<module>/module.json`. A class's deprecated members go to their own

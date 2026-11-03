@@ -32,6 +32,11 @@
 </db:listitem>
 </db:varlistentry>
 </db:variablelist>
+<db:section xml:id="details">
+<db:title>Detailed Description</db:title>
+<db:para>Subclasses may still call <db:link xlink:href="testwatcher.xml#reset">TestWatcher::reset</db:link>(), unlike <db:link xlink:href="missingclass.xml">MissingClass</db:link>.</db:para>
+<db:para>See <db:link xlink:href="testwatcher.xml#nosuchproperty-prop">nosuchproperty</db:link>, <db:link xlink:href="testbase.xml#ownmissing-prop">ownmissing</db:link> and <db:link xlink:href="Example/main.cpp">Example/main.cpp</db:link>.</db:para>
+</db:section>
 <db:section xml:id="member-function-documentation">
 <db:title>Member Function Documentation</db:title>
 <db:section xml:id="dtor.TestBase">
@@ -41,6 +46,11 @@
 <db:section xml:id="entries">
 <db:title>QMap&lt;QString, QVariant&gt; TestBase::entries(const QStringList &amp;<db:emphasis>keys</db:emphasis>, const QSize &amp;<db:emphasis>size</db:emphasis> = QSize(1, 2)) const</db:title>
 <db:para>Returns the entries for <db:code role="parameter">keys</db:code>.</db:para>
+</db:section>
+<db:section xml:id="setLimit">
+<db:title>void TestBase::setLimit(const int &amp;<db:emphasis>value</db:emphasis>)</db:title>
+<db:bridgehead renderas="sect2" xml:id="limit">int TestBase::limit() const</db:bridgehead>
+<db:para>The property limit.</db:para>
 </db:section>
 <db:section xml:id="operator-eq-eq">
 <db:title>bool TestBase::operator==(const TestBase &amp;<db:emphasis>other</db:emphasis>) const</db:title>

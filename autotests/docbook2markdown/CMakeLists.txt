@@ -13,6 +13,7 @@ set(output "${CMAKE_CURRENT_BINARY_DIR}/output")
 add_test(NAME docbook2markdown6_clean COMMAND ${CMAKE_COMMAND} -E rm -rf "${output}")
 add_test(NAME docbook2markdown6_run
     COMMAND docbook2markdown6 --module testmodule --qt-docs-dir "${CMAKE_CURRENT_SOURCE_DIR}/data/qtdocs"
+        --index "${CMAKE_CURRENT_SOURCE_DIR}/data/index/testmodule.index"
         "${CMAKE_CURRENT_SOURCE_DIR}/data/docbook" "${output}"
 )
 add_test(NAME docbook2markdown6_run_second_module
@@ -27,6 +28,12 @@ add_test(NAME docbook2markdown6_output
         "${output}/testmodule/testwatcher.md"
         "${output}/testmodule/testwatcher-obsolete.md"
         "${output}/othermodule/testmodule-module.md"
+)
+# With the index, the struct page gets its title.
+add_test(NAME docbook2markdown6_struct_page COMMAND ${CMAKE_COMMAND} -E cat "${output}/testmodule/outer-testns-settings.md")
+set_tests_properties(docbook2markdown6_struct_page PROPERTIES
+    DEPENDS docbook2markdown6_run_second_module
+    PASS_REGULAR_EXPRESSION "title: \"Outer::TestNs::Settings Struct\""
 )
 # The all-members page is written by the program (from module.json) and lists inherited members.
 add_test(NAME docbook2markdown6_members_page COMMAND ${CMAKE_COMMAND} -E cat "${output}/testmodule/testwatcher-members.md")

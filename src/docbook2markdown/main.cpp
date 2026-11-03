@@ -10,6 +10,7 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QSaveFile>
 
 #include <Sonic/Logging/Logging>
@@ -83,7 +84,10 @@ int main(int argc, char** argv)
         QStringLiteral("Base URL for links into Qt's documentation (default: %1).").arg(options.qtDocsUrl),
         QStringLiteral("url"),
         options.qtDocsUrl);
-    parser.addOptions({moduleOption, qtDocsDirOption, qtDocsUrlOption});
+    const QCommandLineOption indexOption(QStringLiteral("index"),
+        QStringLiteral("The module's .index file from QDoc's prepare step, for the names of its structs and unions (QDoc's DocBook leaves their pages untitled)."),
+        QStringLiteral("file"));
+    parser.addOptions({moduleOption, qtDocsDirOption, qtDocsUrlOption, indexOption});
     parser.addPositionalArgument(QStringLiteral("docbook-dir"), QStringLiteral("QDoc's DocBook output directory (one .xml file per page)."));
     parser.addPositionalArgument(QStringLiteral("output-dir"), QStringLiteral("Where to write <module>/<page>.md (classes also get <page>-members.md and, with deprecated members, "
                                                                               "<page>-obsolete.md), <module>/module.json, toc.yaml and index.md."));
@@ -120,18 +124,48 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const DocBook2Markdown::Converter converter(options);
-    QList<DocBook2Markdown::Page> pages;
+    // Every page's anchors first, so links can be checked against the pages and anchors that exist.
+    QHash<QString, QByteArray> contents;
+    QHash<QString, DocBook2Markdown::PageAnchors> anchors;
     for (const QString& name : std::as_const(files)) {
         QFile file(input.filePath(name));
         if (!file.open(QIODevice::ReadOnly)) {
             sonicCritical() << "Can't read" << file.fileName() << ":" << file.errorString();
             return 1;
         }
+        const QString slug = QFileInfo(name).completeBaseName();
+        contents.insert(slug, file.readAll());
         QString error;
-        const auto page = converter.convert(QFileInfo(name).completeBaseName(), file.readAll(), &error);
-        if (!page) {
+        const auto pageAnchors = DocBook2Markdown::Converter::pageAnchors(contents.value(slug), &error);
+        if (!pageAnchors) {
             sonicCritical() << "Can't convert" << file.fileName() << ":" << error;
+            return 1;
+        }
+        anchors.insert(slug, *pageAnchors);
+    }
+
+    DocBook2Markdown::Converter converter(options);
+    converter.setModuleAnchors(anchors);
+    if (parser.isSet(indexOption)) {
+        QFile index(parser.value(indexOption));
+        if (!index.open(QIODevice::ReadOnly)) {
+            sonicCritical() << "Can't read" << index.fileName() << ":" << index.errorString();
+            return 1;
+        }
+        QString error;
+        const auto aggregates = DocBook2Markdown::Converter::indexAggregates(index.readAll(), &error);
+        if (!aggregates) {
+            sonicCritical() << "Can't read" << index.fileName() << ":" << error;
+            return 1;
+        }
+        converter.setIndexAggregates(*aggregates);
+    }
+    QList<DocBook2Markdown::Page> pages;
+    for (const QString& name : std::as_const(files)) {
+        QString error;
+        const auto page = converter.convert(QFileInfo(name).completeBaseName(), contents.value(QFileInfo(name).completeBaseName()), &error);
+        if (!page) {
+            sonicCritical() << "Can't convert" << input.filePath(name) << ":" << error;
             return 1;
         }
         if (!writeFile(moduleDir + QLatin1Char('/') + page->slug + QStringLiteral(".md"), page->markdown)) {

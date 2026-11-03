@@ -4,7 +4,9 @@
 #pragma once
 
 #include <QByteArray>
+#include <QHash>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -42,7 +44,7 @@ struct ClassInfo {
     QStringList bases;
     //! Qt base classes: name and the URL of Qt's all-members page.
     QList<std::pair<QString, QString>> qtBases;
-    //! Functions and properties, not deprecated ones.
+    //! Functions, properties and variables, not deprecated ones.
     QList<Member> members;
 };
 
@@ -57,6 +59,20 @@ struct Page {
     QString obsoleteMarkdown;
     //! Set on class pages.
     std::optional<ClassInfo> classInfo;
+};
+
+//! The anchors (xml:id) of one DocBook page, and those that move to its deprecated-members page.
+struct PageAnchors {
+    QSet<QString> anchors;
+    QSet<QString> obsolete;
+};
+
+//! A struct or union from QDoc's index of the module: QDoc's DocBook writer leaves their pages untitled.
+struct IndexAggregate {
+    //! E.g. "Sonic::Logging::Options".
+    QString fullName;
+    //! "Struct" or "Union", as Qt's page titles name them.
+    QString typeWord;
 };
 
 //! One section of the reference's contents: a C++ module's classes or a QML module's types.
@@ -121,8 +137,39 @@ public:
     //! Maps a DocBook link target to a Markdown link target.
     QString linkTarget(const QString& href) const;
 
+    //! Reads a page's anchors; returns nothing and sets \a error when the XML can't be read.
+    static std::optional<PageAnchors> pageAnchors(const QByteArray& xml, QString* error);
+
+    /*!
+     * Every page of the module (by file name without ".xml") with its anchors. With it, links to
+     * pages QDoc wrote no file for become plain text, links to anchors that don't exist go to the
+     * page itself, and links to deprecated members go to their page.
+     */
+    void setModuleAnchors(QHash<QString, PageAnchors> anchors);
+
+    /*!
+     * The Markdown target for a link on page \a fromSlug (whose own anchors are \a own), or an empty
+     * string when the link should become plain text.
+     */
+    QString resolveLink(const QString& fromSlug, const PageAnchors& own, const QString& href) const;
+
+    //! Reads the structs and unions (by page, without ".html") from a QDoc .index file; returns nothing and
+    //! sets \a error when the XML can't be read.
+    static std::optional<QHash<QString, IndexAggregate>> indexAggregates(const QByteArray& xml, QString* error);
+
+    /*!
+     * The module's structs and unions, by page. With them, their pages get Qt's titles ("<name> Struct")
+     * and the class page layout, and the class lists of their namespaces and classes link to them.
+     */
+    void setIndexAggregates(QHash<QString, IndexAggregate> aggregates);
+
+    //! The page and entry of the struct or union a class list names \a title (its full or a qualified name).
+    std::optional<std::pair<QString, IndexAggregate>> aggregatePage(const QString& title) const;
+
 private:
     Options m_options;
+    QHash<QString, PageAnchors> m_moduleAnchors;
+    QHash<QString, IndexAggregate> m_aggregates;
 };
 
 }
