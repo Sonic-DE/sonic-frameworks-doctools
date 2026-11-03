@@ -5,6 +5,9 @@
 
 #include <QDir>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QStringList>
 #include <QXmlStreamReader>
@@ -658,10 +661,10 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
     }
     markdown += joinNonEmpty(body, QStringLiteral("\n\n")) + QLatin1Char('\n');
 
-    return Page{slug, title, markdown};
+    return Page{slug, title, description, markdown};
 }
 
-QString Converter::tocYaml(const QList<Page>& pages) const
+ModuleToc Converter::moduleToc(const QList<Page>& pages) const
 {
     const QString& module = m_options.module;
     const Page* modulePage = nullptr;
@@ -678,26 +681,114 @@ QString Converter::tocYaml(const QList<Page>& pages) const
         }
     }
 
-    QStringList lines;
+    ModuleToc toc;
+    toc.module = module;
+    toc.title = modulePage ? modulePage->title : module;
+    toc.description = modulePage ? modulePage->description : QString();
+    const auto path = [&module](const Page* page) {
+        return module + QLatin1Char('/') + page->slug;
+    };
     if (modulePage) {
-        lines << QStringLiteral("rootPage: %1/%2").arg(module, modulePage->slug);
+        toc.modulePage = path(modulePage);
+        toc.pages.append({toc.modulePage, modulePage->title});
     }
-    lines << QStringLiteral("sections:");
-    lines << QStringLiteral("  %1:").arg(yamlString(modulePage ? modulePage->title : module));
-    lines << QStringLiteral("    pages:");
-    if (modulePage) {
-        lines << QStringLiteral("      %1/%2: %3").arg(module, modulePage->slug, yamlString(modulePage->title));
-    }
+    // Classes appear by name, without the " Class" of their page title.
     for (const Page* page : std::as_const(classes)) {
-        lines << QStringLiteral("      %1/%2: %3").arg(module, page->slug, yamlString(page->title.chopped(6)));
+        toc.pages.append({path(page), page->title.chopped(6)});
     }
-    if (!others.isEmpty()) {
-        lines << QStringLiteral("  \"Guides\":") << QStringLiteral("    pages:");
-        for (const Page* page : std::as_const(others)) {
-            lines << QStringLiteral("      %1/%2: %3").arg(module, page->slug, yamlString(page->title));
+    for (const Page* page : std::as_const(others)) {
+        toc.pages.append({path(page), page->title});
+    }
+    return toc;
+}
+
+QByteArray ModuleToc::toJson() const
+{
+    QJsonArray pageArray;
+    for (const auto& [path, title] : pages) {
+        pageArray.append(QJsonArray{path, title});
+    }
+    const QJsonObject object{
+        {QStringLiteral("module"), module},
+        {QStringLiteral("title"), title},
+        {QStringLiteral("description"), description},
+        {QStringLiteral("modulePage"), modulePage},
+        {QStringLiteral("pages"), pageArray},
+    };
+    return QJsonDocument(object).toJson();
+}
+
+std::optional<ModuleToc> ModuleToc::fromJson(const QByteArray& json, QString* error)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(json, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        *error = parseError.errorString();
+        return std::nullopt;
+    }
+    const QJsonObject object = document.object();
+    ModuleToc toc;
+    toc.module = object.value(QStringLiteral("module")).toString();
+    toc.title = object.value(QStringLiteral("title")).toString();
+    toc.description = object.value(QStringLiteral("description")).toString();
+    toc.modulePage = object.value(QStringLiteral("modulePage")).toString();
+    for (const QJsonValue& value : object.value(QStringLiteral("pages")).toArray()) {
+        const QJsonArray pair = value.toArray();
+        if (pair.size() != 2 || !pair.at(0).isString() || !pair.at(1).isString()) {
+            *error = QStringLiteral("a page entry isn't [path, title]");
+            return std::nullopt;
+        }
+        toc.pages.append({pair.at(0).toString(), pair.at(1).toString()});
+    }
+    if (toc.module.isEmpty() || toc.title.isEmpty() || toc.pages.isEmpty()) {
+        *error = QStringLiteral("module, title or pages missing");
+        return std::nullopt;
+    }
+    return toc;
+}
+
+QString tocYaml(const QList<ModuleToc>& modules)
+{
+    // Section titles are YAML keys, so they must not repeat: each module is one section (two
+    // modules' "Guides" sections would collide), and a title already used gets the module's folder.
+    QStringList lines;
+    lines << QStringLiteral("rootPage: %1").arg(IndexPage);
+    lines << QStringLiteral("sections:");
+    lines << QStringLiteral("  \"Overview\":") << QStringLiteral("    pages:");
+    lines << QStringLiteral("      %1: \"All Modules\"").arg(IndexPage);
+    QStringList usedTitles{QStringLiteral("Overview")};
+    for (const ModuleToc& module : modules) {
+        QString section = module.title;
+        if (usedTitles.contains(section)) {
+            section += QStringLiteral(" (%1)").arg(module.module);
+        }
+        usedTitles.append(section);
+        lines << QStringLiteral("  %1:").arg(yamlString(section)) << QStringLiteral("    pages:");
+        for (const auto& [path, title] : module.pages) {
+            lines << QStringLiteral("      %1: %2").arg(path, yamlString(title));
         }
     }
     return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
 }
 
+QString indexMarkdown(const QList<ModuleToc>& modules)
+{
+    QStringList lines;
+    lines << QStringLiteral("---") << QStringLiteral("title: \"All Modules\"")
+          << QStringLiteral("description: \"Reference documentation for the SonicDE libraries.\"") << QStringLiteral("---") << QString();
+    lines << QStringLiteral("# All Modules") << QString();
+    lines << QStringLiteral("Reference documentation for the SonicDE libraries, generated from their source code. "
+                            "Guides for using and developing SonicDE are in the [SonicDE Documentation](/docs).")
+          << QString();
+    lines << QStringLiteral("## C++ Modules {#modules}") << QString();
+    for (const ModuleToc& module : modules) {
+        const QString target = (module.modulePage.isEmpty() ? module.pages.first().first : module.modulePage) + QStringLiteral(".md");
+        QString line = QStringLiteral("- [%1](%2)").arg(escape(module.title), target);
+        if (!module.description.isEmpty()) {
+            line += QStringLiteral(": ") + escape(module.description);
+        }
+        lines << line;
+    }
+    return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+}
 }

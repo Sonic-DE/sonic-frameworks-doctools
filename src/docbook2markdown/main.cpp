@@ -68,7 +68,10 @@ int main(int argc, char** argv)
     DocBook2Markdown::Options options;
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Converts QDoc's DocBook output into Markdown pages and a toc.yaml for the Winter CMS docs plugin."));
+    parser.setApplicationDescription(
+        QStringLiteral("Converts one module's QDoc DocBook output into Markdown pages for the Winter CMS docs plugin. "
+                       "Run it once per module with the same output directory: each run also rewrites toc.yaml and "
+                       "index.md for every module converted there."));
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption moduleOption(QStringLiteral("module"), QStringLiteral("Folder name for the module's pages, e.g. kconfigcore (required)."), QStringLiteral("name"));
@@ -82,7 +85,7 @@ int main(int argc, char** argv)
         options.qtDocsUrl);
     parser.addOptions({moduleOption, qtDocsDirOption, qtDocsUrlOption});
     parser.addPositionalArgument(QStringLiteral("docbook-dir"), QStringLiteral("QDoc's DocBook output directory (one .xml file per page)."));
-    parser.addPositionalArgument(QStringLiteral("output-dir"), QStringLiteral("Where to write <module>/<page>.md and toc.yaml."));
+    parser.addPositionalArgument(QStringLiteral("output-dir"), QStringLiteral("Where to write <module>/<page>.md, <module>/module.json, toc.yaml and index.md."));
     parser.process(app);
 
     const QStringList positional = parser.positionalArguments();
@@ -139,10 +142,36 @@ int main(int argc, char** argv)
     if (input.exists(QStringLiteral("images")) && !copyDirectory(input.filePath(QStringLiteral("images")), moduleDir + QStringLiteral("/images"))) {
         return 1;
     }
-    if (!writeFile(output + QStringLiteral("/toc.yaml"), converter.tocYaml(pages))) {
+    if (!writeFile(moduleDir + QStringLiteral("/module.json"), QString::fromUtf8(converter.moduleToc(pages).toJson()))) {
+        return 1;
+    }
+    sonicInfo() << "Converted" << pages.size() << "pages of module" << options.module << "into" << output;
+
+    // The reference covers every module converted into this directory so far, this one included.
+    QList<DocBook2Markdown::ModuleToc> modules;
+    for (const QString& name : QDir(output).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        QFile file(output + QLatin1Char('/') + name + QStringLiteral("/module.json"));
+        if (!file.exists()) {
+            continue;
+        }
+        QString error;
+        const auto module = file.open(QIODevice::ReadOnly) ? DocBook2Markdown::ModuleToc::fromJson(file.readAll(), &error) : std::nullopt;
+        if (!module) {
+            sonicCritical() << "Can't read" << file.fileName() << ":" << (error.isEmpty() ? file.errorString() : error);
+            return 1;
+        }
+        modules.append(*module);
+    }
+    // By title, then folder, so the order doesn't depend on the directory listing.
+    std::sort(modules.begin(), modules.end(), [](const auto& a, const auto& b) {
+        const int byTitle = a.title.compare(b.title, Qt::CaseInsensitive);
+        return byTitle != 0 ? byTitle < 0 : a.module < b.module;
+    });
+    if (!writeFile(output + QStringLiteral("/toc.yaml"), DocBook2Markdown::tocYaml(modules))
+        || !writeFile(output + QLatin1Char('/') + DocBook2Markdown::IndexPage + QStringLiteral(".md"), DocBook2Markdown::indexMarkdown(modules))) {
         return 1;
     }
 
-    sonicInfo() << "Converted" << pages.size() << "pages of module" << options.module << "into" << output;
+    sonicInfo() << "Wrote the reference's toc.yaml and index page for" << modules.size() << "modules";
     return 0;
 }
