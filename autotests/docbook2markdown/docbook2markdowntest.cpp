@@ -10,6 +10,8 @@
 
 #include <Sonic/Logging/Log>
 
+#include <algorithm>
+
 SONIC_LOGGING_COMPONENT("org.sonicde.frameworks.doctools.docbook2markdown.test");
 
 using namespace DocBook2Markdown;
@@ -187,14 +189,74 @@ private Q_SLOTS:
         QVERIFY(markdown.startsWith(QLatin1String("---\ntitle: \"TestWatcher Class\"\ndescription: \"Watches a TestConfig for changes.\"\n---\n")));
     }
 
-    void tocListsEveryClassWithTheModulePageAsRoot()
+    void moduleTocListsEveryPageWithTheModulePageFirst()
     {
         const QList<Page> pages = allPages();
-        const QString toc = converter().tocYaml(pages);
-        QVERIFY(toc.startsWith(QLatin1String("rootPage: testmodule/testmodule-module\n")));
+        const ModuleToc toc = converter().moduleToc(pages);
+        QCOMPARE(toc.pages.size(), pages.size());
+        QCOMPARE(toc.pages.first().first, toc.modulePage);
+        QVERIFY(toc.modulePage.endsWith(QLatin1String("-module")));
+        QVERIFY(!toc.description.isEmpty());
         for (const Page& p : pages) {
-            QVERIFY2(toc.contains(QStringLiteral("testmodule/%1:").arg(p.slug)), qPrintable(p.slug));
+            QVERIFY2(std::any_of(toc.pages.cbegin(), toc.pages.cend(), [&p](const auto& entry) {
+                return entry.first == QStringLiteral("testmodule/") + p.slug;
+            }),
+                qPrintable(p.slug));
         }
+    }
+
+    void moduleTocSurvivesItsJson()
+    {
+        const ModuleToc toc = converter().moduleToc(allPages());
+        QString error;
+        const auto read = ModuleToc::fromJson(toc.toJson(), &error);
+        QVERIFY2(read, qPrintable(error));
+        QCOMPARE(read->module, toc.module);
+        QCOMPARE(read->title, toc.title);
+        QCOMPARE(read->description, toc.description);
+        QCOMPARE(read->modulePage, toc.modulePage);
+        QCOMPARE(read->pages, toc.pages);
+
+        QVERIFY(!ModuleToc::fromJson(QByteArrayLiteral("{\"module\": \"x\"}"), &error));
+        QVERIFY(!ModuleToc::fromJson(QByteArrayLiteral("not json"), &error));
+    }
+
+    void referenceTocHasTheIndexAsRootAndUniqueModuleSections()
+    {
+        // Two modules with the same pages and the same title, under different folders.
+        const ModuleToc first = converter().moduleToc(allPages());
+        ModuleToc second = first;
+        second.module = QStringLiteral("othermodule");
+        for (auto& entry : second.pages) {
+            entry.first.replace(QLatin1String("testmodule/"), QLatin1String("othermodule/"));
+        }
+        const QString toc = tocYaml({first, second});
+
+        QVERIFY(toc.startsWith(QStringLiteral("rootPage: %1\n").arg(IndexPage)));
+        QVERIFY(toc.contains(QStringLiteral("      %1: ").arg(IndexPage)));
+        // Section titles are YAML keys at two spaces of indentation: none may repeat.
+        QStringList sections;
+        for (const QString& line : toc.split(QLatin1Char('\n'))) {
+            if (line.startsWith(QLatin1String("  ")) && !line.startsWith(QLatin1String("   ")) && line.endsWith(QLatin1Char(':'))) {
+                QVERIFY2(!sections.contains(line), qPrintable(line));
+                sections.append(line);
+            }
+        }
+        QCOMPARE(sections.size(), 3);
+        for (const ModuleToc& module : {first, second}) {
+            for (const auto& [path, title] : module.pages) {
+                QVERIFY2(toc.contains(QStringLiteral("      %1: ").arg(path)), qPrintable(path));
+            }
+        }
+    }
+
+    void indexLinksEveryModulePageWithItsDescription()
+    {
+        const ModuleToc toc = converter().moduleToc(allPages());
+        const QString index = indexMarkdown({toc});
+        QVERIFY(index.startsWith(QLatin1String("---\ntitle: ")));
+        QVERIFY2(index.contains(QStringLiteral("](%1.md): %2").arg(toc.modulePage, toc.description)), qPrintable(index));
+        QVERIFY(index.contains(QLatin1String("](/docs)")));
     }
 
     void invalidXmlIsAnError()
