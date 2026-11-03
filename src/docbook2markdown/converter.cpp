@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStringList>
 #include <QXmlStreamReader>
 
@@ -144,10 +145,154 @@ namespace {
         return kept.join(separator);
     }
 
+    // Tags like "[signal]", "[static]" or "[explicit, since 6.23]" at the start of member headings.
+    const QRegularExpression& leadingTags()
+    {
+        static const QRegularExpression pattern(QStringLiteral(R"(^(\[[^\]]+\]\s*)+)"));
+        return pattern;
+    }
+
+    //! A member heading's text without its parameter names (QDoc marks them as <emphasis>).
+    QString titleWithoutParameterNames(const Element& title)
+    {
+        QString result;
+        for (const Node& node : title.children) {
+            if (!node.element) {
+                result += node.text;
+            } else if (node.element->name != QLatin1String("emphasis")) {
+                result += node.element->text();
+            }
+        }
+        static const QRegularExpression whitespace(QStringLiteral(R"(\s+)"));
+        return result.replace(whitespace, QStringLiteral(" ")).trimmed();
+    }
+
+    //! Splits at commas outside brackets, e.g. "QMap<int, int> a, int b" into two parts.
+    QStringList splitTopLevel(const QString& text, QChar separator)
+    {
+        QStringList parts;
+        int depth = 0;
+        qsizetype start = 0;
+        for (qsizetype i = 0; i < text.size(); ++i) {
+            const QChar c = text.at(i);
+            if (c == QLatin1Char('(') || c == QLatin1Char('<') || c == QLatin1Char('{') || c == QLatin1Char('[')) {
+                ++depth;
+            } else if (c == QLatin1Char(')') || c == QLatin1Char('>') || c == QLatin1Char('}') || c == QLatin1Char(']')) {
+                --depth;
+            } else if (c == separator && depth == 0) {
+                parts.append(text.mid(start, i - start));
+                start = i + 1;
+            }
+        }
+        parts.append(text.mid(start));
+        return parts;
+    }
+
+    /*!
+     * A member heading as Qt's members lists show it: "name(param types) const : return type", without
+     * parameter names, default arguments or the class qualifier, and without "void". Headings that
+     * aren't functions (properties are "name : type") stay as they are.
+     */
+    Member memberEntry(const Element& title, const QString& anchor)
+    {
+        QString text = titleWithoutParameterNames(title);
+        text.remove(leadingTags());
+        text = text.trimmed();
+
+        // The function name follows the last "::" before the parameter list. The qualifier is the class
+        // name as QDoc writes it ("KConfig::", but only "ItemBool::" for KCoreConfigSkeleton::ItemBool).
+        const qsizetype open = text.indexOf(QLatin1Char('('));
+        const qsizetype at = open < 0 ? -1 : text.lastIndexOf(QLatin1String("::"), open);
+        if (at < 0) {
+            const QString name = text.section(QLatin1Char(' '), 0, 0);
+            return Member{name, text, anchor};
+        }
+        qsizetype qualifierStart = at;
+        while (qualifierStart > 0) {
+            const QChar c = text.at(qualifierStart - 1);
+            if (!c.isLetterOrNumber() && c != QLatin1Char('_') && c != QLatin1Char(':') && c != QLatin1Char('<') && c != QLatin1Char('>')) {
+                break;
+            }
+            --qualifierStart;
+        }
+
+        const QString returnType = text.left(qualifierStart).trimmed();
+        QString rest = text.mid(at + 2);
+        // "operator()" has its own parentheses before the parameter list.
+        const qsizetype nameEnd = rest.startsWith(QLatin1String("operator()")) ? rest.indexOf(QLatin1Char('('), 9) : rest.indexOf(QLatin1Char('('));
+        const QString name = rest.left(nameEnd).trimmed();
+
+        int depth = 0;
+        qsizetype close = -1;
+        for (qsizetype i = nameEnd; i < rest.size(); ++i) {
+            if (rest.at(i) == QLatin1Char('(')) {
+                ++depth;
+            } else if (rest.at(i) == QLatin1Char(')') && --depth == 0) {
+                close = i;
+                break;
+            }
+        }
+        if (close < 0) {
+            return Member{name, text, anchor};
+        }
+
+        QStringList parameters;
+        for (QString parameter : splitTopLevel(rest.mid(nameEnd + 1, close - nameEnd - 1), QLatin1Char(','))) {
+            const qsizetype defaultAt = splitTopLevel(parameter, QLatin1Char('=')).first().size();
+            parameter = parameter.left(defaultAt).trimmed();
+            if (!parameter.isEmpty()) {
+                parameters.append(parameter);
+            }
+        }
+        static const QRegularExpression constQualifier(QStringLiteral(R"(\bconst\b)"));
+        QString signature = name + QLatin1Char('(') + parameters.join(QStringLiteral(", ")) + QLatin1Char(')');
+        if (constQualifier.match(rest.mid(close + 1)).hasMatch()) {
+            signature += QStringLiteral(" const");
+        }
+        if (!returnType.isEmpty() && returnType != QLatin1String("void")) {
+            signature += QStringLiteral(" : ") + returnType;
+        }
+        return Member{name, signature, anchor};
+    }
+
+    //! Adds the base classes from the requirements' "Inherits" row: SonicDE ones by page path, Qt ones
+    //! with the URL of Qt's all-members page.
+    void addBaseClasses(const Element& requirements, const Options& options, ClassInfo* info)
+    {
+        static const QRegularExpression crossModule(QStringLiteral(R"(^\.\./([^/]+)/([^#]+?)\.html(#.*)?$)"));
+
+        for (const Element* entry : requirements.childElements(QStringLiteral("varlistentry"))) {
+            const Element* term = entry->child(QStringLiteral("term"));
+            if (!term || term->text().trimmed() != QLatin1String("Inherits")) {
+                continue;
+            }
+            std::function<void(const Element&)> visit = [&](const Element& element) {
+                for (const Element* child : element.childElements()) {
+                    if (child->name != QLatin1String("link")) {
+                        visit(*child);
+                        continue;
+                    }
+                    const QString href = child->attribute(QStringLiteral("href"));
+                    const QRegularExpressionMatch cross = crossModule.match(href);
+                    if (cross.hasMatch() && QDir(options.qtDocsDir).exists(cross.captured(1))) {
+                        info->qtBases.append({child->text().trimmed(), options.qtDocsUrl + cross.captured(2) + QStringLiteral("-members.html")});
+                    } else if (cross.hasMatch()) {
+                        info->bases.append(cross.captured(1) + QLatin1Char('/') + cross.captured(2));
+                    } else if (href.endsWith(QLatin1String(".xml"))) {
+                        info->bases.append(options.module + QLatin1Char('/') + href.chopped(4));
+                    }
+                }
+            };
+            visit(*entry);
+        }
+    }
+
     class PageWriter {
     public:
-        explicit PageWriter(const Converter& converter)
+        explicit PageWriter(const Converter& converter, QString slug = QString(), QSet<QString> obsoleteIds = {})
             : m_converter(converter)
+            , m_slug(std::move(slug))
+            , m_obsoleteIds(std::move(obsoleteIds))
         {
         }
 
@@ -178,7 +323,8 @@ namespace {
         }
 
         QStringList block(const Element& element, int level) const;
-        QStringList summaries(const Element& root) const;
+        //! Summary sections for the member documentation sections with ids "<prefix>member-...".
+        QStringList summaries(const Element& root, const QString& prefix = QString()) const;
         QString requirements(const Element& list) const;
 
     private:
@@ -189,6 +335,9 @@ namespace {
         QString table(const Element& element) const;
 
         const Converter& m_converter;
+        //! The page being written, and the anchors of its members that moved to its obsolete page.
+        QString m_slug;
+        QSet<QString> m_obsoleteIds;
     };
 
     QString PageWriter::inlineElement(const Element& element) const
@@ -204,6 +353,10 @@ namespace {
             }
             if (text.isEmpty()) {
                 text = escape(href);
+            }
+            const QString ownPage = m_slug + QStringLiteral(".xml#");
+            if (!m_obsoleteIds.isEmpty() && href.startsWith(ownPage) && m_obsoleteIds.contains(href.mid(ownPage.size()))) {
+                return QStringLiteral("[%1](%2-obsolete.md#%3)").arg(text, m_slug, href.mid(ownPage.size()));
             }
             return QStringLiteral("[%1](%2)").arg(text, m_converter.linkTarget(href));
         }
@@ -426,7 +579,7 @@ namespace {
         return lines.join(QLatin1Char('\n'));
     }
 
-    QStringList PageWriter::summaries(const Element& root) const
+    QStringList PageWriter::summaries(const Element& root, const QString& prefix) const
     {
         // Summary sections in Qt's order, keyed by the tag QDoc puts in member headings.
         struct Group {
@@ -449,18 +602,17 @@ namespace {
         };
         QStringList types;
 
-        // Tags like "[signal]", "[static]" or "[explicit, since 6.23]" at the start of member headings.
         static const QRegularExpression tagPattern(QStringLiteral(R"(\[([^\]]+)\])"));
-        static const QRegularExpression leadingTags(QStringLiteral(R"(^(\[[^\]]+\]\s*)+)"));
         static const QRegularExpression sinceTag(QStringLiteral(R"(\bsince ([0-9][0-9.]*))"));
+        static const QRegularExpression deprecatedTag(QStringLiteral(R"(\bdeprecated in ([0-9][0-9.]*))"));
         static const QRegularExpression qualifier(QStringLiteral(R"(\b[A-Za-z_]\w*::(?=[~A-Za-z_]\w*\s*\())"));
 
         std::function<void(const Element&)> visit = [&](const Element& element) {
             for (const Element* sectionElement : element.childElements(QStringLiteral("section"))) {
                 const QString id = sectionElement->attribute(QStringLiteral("id"));
-                const bool isTypes = id == QLatin1String("member-type-documentation");
-                const bool isProperties = id == QLatin1String("property-documentation");
-                const bool isFunctions = id == QLatin1String("member-function-documentation");
+                const bool isTypes = id == prefix + QStringLiteral("member-type-documentation");
+                const bool isProperties = id == prefix + QStringLiteral("property-documentation");
+                const bool isFunctions = id == prefix + QStringLiteral("member-function-documentation");
 
                 if (isTypes || isProperties || isFunctions) {
                     for (const Element* member : sectionElement->childElements(QStringLiteral("section"))) {
@@ -480,13 +632,18 @@ namespace {
 
                         QString key = QStringLiteral("public");
                         QString since;
-                        const QRegularExpressionMatch leading = leadingTags.match(title);
+                        QString deprecated;
+                        const QRegularExpressionMatch leading = leadingTags().match(title);
                         auto tags = tagPattern.globalMatch(leading.captured(0));
                         while (tags.hasNext()) {
                             const QString tag = tags.next().captured(1);
                             const QRegularExpressionMatch sinceMatch = sinceTag.match(tag);
                             if (sinceMatch.hasMatch()) {
                                 since = sinceMatch.captured(1);
+                            }
+                            const QRegularExpressionMatch deprecatedMatch = deprecatedTag.match(tag);
+                            if (deprecatedMatch.hasMatch()) {
+                                deprecated = deprecatedMatch.captured(1);
                             }
                             if (tag.contains(QLatin1String("signal"))) {
                                 key = QStringLiteral("signal");
@@ -498,13 +655,16 @@ namespace {
                                 key = QStringLiteral("protected");
                             }
                         }
-                        // Summary entries drop the tags and the class qualifier, and show "(since X)",
-                        // as in Qt's summaries.
+                        // Summary entries drop the tags and the class qualifier, and show "(since X)"
+                        // and "(deprecated in X)", as in Qt's summaries.
                         QString bare = title;
-                        bare.remove(leadingTags).remove(qualifier);
+                        bare.remove(leadingTags()).remove(qualifier);
                         QString line = entry.arg(escape(bare));
                         if (!since.isEmpty()) {
                             line += QStringLiteral(" (since %1)").arg(since);
+                        }
+                        if (!deprecated.isEmpty()) {
+                            line += QStringLiteral(" (deprecated in %1)").arg(deprecated);
                         }
                         group(key).append(line);
                     }
@@ -614,7 +774,6 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
         return std::nullopt;
     }
 
-    const PageWriter writer(*this);
     const Element* info = root->child(QStringLiteral("info"));
     const Element* titleElement = info ? info->child(QStringLiteral("title")) : nullptr;
     if (!titleElement) {
@@ -622,6 +781,33 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
         return std::nullopt;
     }
     const QString title = titleElement->text().trimmed();
+    const bool isClass = title.endsWith(QLatin1String(" Class"));
+    const QString className = isClass ? title.chopped(6) : QString();
+
+    // Deprecated members (QDoc's "obsolete" section) go to their own page, and links to them follow.
+    const Element* obsolete = nullptr;
+    bool hasDetails = false;
+    for (const Element* child : root->childElements(QStringLiteral("section"))) {
+        const QString id = child->attribute(QStringLiteral("id"));
+        if (id == QLatin1String("obsolete")) {
+            obsolete = child;
+        } else if (id == QLatin1String("details")) {
+            hasDetails = true;
+        }
+    }
+    QSet<QString> obsoleteIds;
+    if (obsolete) {
+        std::function<void(const Element&)> collect = [&](const Element& element) {
+            for (const Element* child : element.childElements(QStringLiteral("section"))) {
+                if (!child->attribute(QStringLiteral("id")).isEmpty()) {
+                    obsoleteIds.insert(child->attribute(QStringLiteral("id")));
+                }
+                collect(*child);
+            }
+        };
+        collect(*obsolete);
+    }
+    const PageWriter writer(*this, slug, obsoleteIds);
 
     const Element* abstract = info->child(QStringLiteral("abstract"));
     const QString brief = abstract ? writer.blocks(*abstract, 2).join(QLatin1Char(' ')).trimmed() : QString();
@@ -632,18 +818,29 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
     QString description = brief;
     description.replace(links, QStringLiteral("\\1")).remove(markup);
 
-    const bool isClass = title.endsWith(QLatin1String(" Class"));
+    Page page{slug, title, description, QString(), QString(), std::nullopt};
+    if (isClass) {
+        page.classInfo = ClassInfo{m_options.module + QLatin1Char('/') + slug, className, {}, {}, {}};
+    }
+
     QStringList body;
     bool requirementsDone = false;
     for (const Element* child : root->childElements()) {
-        if (child->name == QLatin1String("info")) {
+        if (child->name == QLatin1String("info") || child == obsolete) {
             continue;
         }
         if (isClass && !requirementsDone && body.isEmpty() && child->name == QLatin1String("variablelist")) {
-            // Requirements block (Header, CMake, Inherits, ...), then the rebuilt summaries.
+            // Requirements block (Header, CMake, Inherits, ...), the member lists, then the rebuilt summaries.
             requirementsDone = true;
             body.append(writer.requirements(*child));
+            // A paragraph with line breaks, not a list: Markdown would merge a list into the requirements.
+            QStringList memberLinks{QStringLiteral("[List of all members, including inherited members](%1-members.md)").arg(slug)};
+            if (obsolete) {
+                memberLinks.append(QStringLiteral("[Deprecated members](%1-obsolete.md)").arg(slug));
+            }
+            body.append(memberLinks.join(QStringLiteral("  \n")));
             body += writer.summaries(*root);
+            addBaseClasses(*child, m_options, &*page.classInfo);
             continue;
         }
         body += writer.block(*child, 2);
@@ -654,66 +851,181 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
         body.removeFirst();
     }
 
+    if (page.classInfo) {
+        for (const Element* sectionElement : root->childElements(QStringLiteral("section"))) {
+            const QString id = sectionElement->attribute(QStringLiteral("id"));
+            if (id != QLatin1String("member-function-documentation") && id != QLatin1String("property-documentation")) {
+                continue;
+            }
+            for (const Element* member : sectionElement->childElements(QStringLiteral("section"))) {
+                const Element* memberTitle = member->child(QStringLiteral("title"));
+                if (memberTitle) {
+                    page.classInfo->members.append(memberEntry(*memberTitle, member->attribute(QStringLiteral("id"))));
+                }
+            }
+        }
+    }
+
     QString markdown = QStringLiteral("---\ntitle: %1\ndescription: %2\n---\n\n").arg(yamlString(title), yamlString(description));
     markdown += QStringLiteral("# ") + escape(title) + QStringLiteral("\n\n");
     if (!brief.isEmpty()) {
-        markdown += brief + QStringLiteral("\n\n");
+        // Qt's "More..." jumps from the brief to the Detailed Description.
+        markdown += brief + (hasDetails ? QStringLiteral(" [More...](#details)") : QString()) + QStringLiteral("\n\n");
     }
     markdown += joinNonEmpty(body, QStringLiteral("\n\n")) + QLatin1Char('\n');
+    page.markdown = markdown;
 
-    return Page{slug, title, description, markdown};
+    if (obsolete) {
+        // Like Qt's "<class>-obsolete.html": QDoc's note, the deprecated members' summaries, then their documentation.
+        const Element* obsoleteTitle = obsolete->child(QStringLiteral("title"));
+        const QString heading = obsoleteTitle ? obsoleteTitle->text().trimmed() : QStringLiteral("Obsolete Members for %1").arg(className);
+        QStringList obsoleteBody;
+        for (const Element* child : obsolete->childElements()) {
+            if (child->name != QLatin1String("section")) {
+                obsoleteBody += writer.block(*child, 2);
+            }
+        }
+        obsoleteBody += writer.summaries(*obsolete, QStringLiteral("obsolete-"));
+        for (const Element* child : obsolete->childElements(QStringLiteral("section"))) {
+            obsoleteBody += writer.block(*child, 2);
+        }
+        page.obsoleteMarkdown = QStringLiteral("---\ntitle: %1\ndescription: %2\nparent: %3\n---\n\n")
+                                    .arg(yamlString(heading),
+                                        yamlString(QStringLiteral("Deprecated members of %1.").arg(className.isEmpty() ? title : className)),
+                                        yamlString(m_options.module + QLatin1Char('/') + slug));
+        page.obsoleteMarkdown += QStringLiteral("# ") + escape(heading) + QStringLiteral("\n\n") + joinNonEmpty(obsoleteBody, QStringLiteral("\n\n")) + QLatin1Char('\n');
+    }
+
+    return page;
 }
 
 ModuleToc Converter::moduleToc(const QList<Page>& pages) const
 {
     const QString& module = m_options.module;
     const Page* modulePage = nullptr;
+    const Page* qmlModulePage = nullptr;
     QList<const Page*> classes;
     QList<const Page*> others;
+    QList<const Page*> qmlTypes;
 
     for (const Page& page : pages) {
         if (!modulePage && page.slug.endsWith(QLatin1String("-module"))) {
             modulePage = &page;
-        } else if (page.title.endsWith(QLatin1String(" Class"))) {
+        } else if (!qmlModulePage && page.slug.endsWith(QLatin1String("-qmlmodule"))) {
+            qmlModulePage = &page;
+        } else if (page.slug.startsWith(QLatin1String("qml-"))) {
+            qmlTypes.append(&page);
+        } else if (page.classInfo) {
             classes.append(&page);
         } else {
             others.append(&page);
         }
     }
 
-    ModuleToc toc;
-    toc.module = module;
-    toc.title = modulePage ? modulePage->title : module;
-    toc.description = modulePage ? modulePage->description : QString();
     const auto path = [&module](const Page* page) {
         return module + QLatin1Char('/') + page->slug;
     };
-    if (modulePage) {
-        toc.modulePage = path(modulePage);
-        toc.pages.append({toc.modulePage, modulePage->title});
+    const auto startSection = [&](const Page* sectionPage, const QString& fallbackTitle, bool qml) {
+        TocSection section;
+        section.title = sectionPage ? sectionPage->title : fallbackTitle;
+        section.description = sectionPage ? sectionPage->description : QString();
+        section.qml = qml;
+        if (sectionPage) {
+            section.page = path(sectionPage);
+            section.pages.append({section.page, sectionPage->title});
+        }
+        return section;
+    };
+
+    ModuleToc toc;
+    toc.module = module;
+    if (modulePage || !classes.isEmpty() || !others.isEmpty()) {
+        TocSection section = startSection(modulePage, module, false);
+        // Classes appear by name, without the " Class" of their page title.
+        for (const Page* page : std::as_const(classes)) {
+            section.pages.append({path(page), page->classInfo->name});
+        }
+        for (const Page* page : std::as_const(others)) {
+            section.pages.append({path(page), page->title});
+        }
+        toc.sections.append(section);
     }
-    // Classes appear by name, without the " Class" of their page title.
-    for (const Page* page : std::as_const(classes)) {
-        toc.pages.append({path(page), page->title.chopped(6)});
+    if (qmlModulePage || !qmlTypes.isEmpty()) {
+        TocSection section = startSection(qmlModulePage, module + QStringLiteral(" QML Types"), true);
+        // QML types appear by name, e.g. "WindowStateSaver" for "WindowStateSaver QML Type".
+        for (const Page* page : std::as_const(qmlTypes)) {
+            section.pages.append({path(page), QString(page->title).remove(QStringLiteral(" QML Type"))});
+        }
+        toc.sections.append(section);
     }
-    for (const Page* page : std::as_const(others)) {
-        toc.pages.append({path(page), page->title});
+    for (const Page& page : pages) {
+        if (page.classInfo) {
+            toc.classes.append(*page.classInfo);
+        }
     }
     return toc;
 }
 
+QString ModuleToc::title() const
+{
+    return sections.isEmpty() ? module : sections.first().title;
+}
+
+namespace {
+
+    QJsonArray pairsToJson(const QList<std::pair<QString, QString>>& pairs)
+    {
+        QJsonArray array;
+        for (const auto& [first, second] : pairs) {
+            array.append(QJsonArray{first, second});
+        }
+        return array;
+    }
+
+    bool pairsFromJson(const QJsonValue& value, QList<std::pair<QString, QString>>* pairs)
+    {
+        for (const QJsonValue& item : value.toArray()) {
+            const QJsonArray pair = item.toArray();
+            if (pair.size() != 2 || !pair.at(0).isString() || !pair.at(1).isString()) {
+                return false;
+            }
+            pairs->append({pair.at(0).toString(), pair.at(1).toString()});
+        }
+        return true;
+    }
+
+}
+
 QByteArray ModuleToc::toJson() const
 {
-    QJsonArray pageArray;
-    for (const auto& [path, title] : pages) {
-        pageArray.append(QJsonArray{path, title});
+    QJsonArray sectionArray;
+    for (const TocSection& section : sections) {
+        sectionArray.append(QJsonObject{
+            {QStringLiteral("title"), section.title},
+            {QStringLiteral("description"), section.description},
+            {QStringLiteral("page"), section.page},
+            {QStringLiteral("qml"), section.qml},
+            {QStringLiteral("pages"), pairsToJson(section.pages)},
+        });
+    }
+    QJsonArray classArray;
+    for (const ClassInfo& info : classes) {
+        QJsonArray memberArray;
+        for (const Member& member : info.members) {
+            memberArray.append(QJsonArray{member.name, member.signature, member.anchor});
+        }
+        classArray.append(QJsonObject{
+            {QStringLiteral("page"), info.page},
+            {QStringLiteral("name"), info.name},
+            {QStringLiteral("bases"), QJsonArray::fromStringList(info.bases)},
+            {QStringLiteral("qtBases"), pairsToJson(info.qtBases)},
+            {QStringLiteral("members"), memberArray},
+        });
     }
     const QJsonObject object{
         {QStringLiteral("module"), module},
-        {QStringLiteral("title"), title},
-        {QStringLiteral("description"), description},
-        {QStringLiteral("modulePage"), modulePage},
-        {QStringLiteral("pages"), pageArray},
+        {QStringLiteral("sections"), sectionArray},
+        {QStringLiteral("classes"), classArray},
     };
     return QJsonDocument(object).toJson();
 }
@@ -729,19 +1041,51 @@ std::optional<ModuleToc> ModuleToc::fromJson(const QByteArray& json, QString* er
     const QJsonObject object = document.object();
     ModuleToc toc;
     toc.module = object.value(QStringLiteral("module")).toString();
-    toc.title = object.value(QStringLiteral("title")).toString();
-    toc.description = object.value(QStringLiteral("description")).toString();
-    toc.modulePage = object.value(QStringLiteral("modulePage")).toString();
-    for (const QJsonValue& value : object.value(QStringLiteral("pages")).toArray()) {
-        const QJsonArray pair = value.toArray();
-        if (pair.size() != 2 || !pair.at(0).isString() || !pair.at(1).isString()) {
+    for (const QJsonValue& value : object.value(QStringLiteral("sections")).toArray()) {
+        const QJsonObject sectionObject = value.toObject();
+        TocSection section;
+        section.title = sectionObject.value(QStringLiteral("title")).toString();
+        section.description = sectionObject.value(QStringLiteral("description")).toString();
+        section.page = sectionObject.value(QStringLiteral("page")).toString();
+        section.qml = sectionObject.value(QStringLiteral("qml")).toBool();
+        if (!pairsFromJson(sectionObject.value(QStringLiteral("pages")), &section.pages)) {
             *error = QStringLiteral("a page entry isn't [path, title]");
             return std::nullopt;
         }
-        toc.pages.append({pair.at(0).toString(), pair.at(1).toString()});
+        if (section.title.isEmpty() || section.pages.isEmpty()) {
+            *error = QStringLiteral("a section has no title or pages");
+            return std::nullopt;
+        }
+        toc.sections.append(section);
     }
-    if (toc.module.isEmpty() || toc.title.isEmpty() || toc.pages.isEmpty()) {
-        *error = QStringLiteral("module, title or pages missing");
+    for (const QJsonValue& value : object.value(QStringLiteral("classes")).toArray()) {
+        const QJsonObject classObject = value.toObject();
+        ClassInfo info;
+        info.page = classObject.value(QStringLiteral("page")).toString();
+        info.name = classObject.value(QStringLiteral("name")).toString();
+        for (const QJsonValue& base : classObject.value(QStringLiteral("bases")).toArray()) {
+            info.bases.append(base.toString());
+        }
+        if (!pairsFromJson(classObject.value(QStringLiteral("qtBases")), &info.qtBases)) {
+            *error = QStringLiteral("a Qt base isn't [name, url]");
+            return std::nullopt;
+        }
+        for (const QJsonValue& memberValue : classObject.value(QStringLiteral("members")).toArray()) {
+            const QJsonArray member = memberValue.toArray();
+            if (member.size() != 3) {
+                *error = QStringLiteral("a member isn't [name, signature, anchor]");
+                return std::nullopt;
+            }
+            info.members.append(Member{member.at(0).toString(), member.at(1).toString(), member.at(2).toString()});
+        }
+        if (info.page.isEmpty() || info.name.isEmpty()) {
+            *error = QStringLiteral("a class has no page or name");
+            return std::nullopt;
+        }
+        toc.classes.append(info);
+    }
+    if (toc.module.isEmpty() || toc.sections.isEmpty()) {
+        *error = QStringLiteral("module or sections missing");
         return std::nullopt;
     }
     return toc;
@@ -749,8 +1093,8 @@ std::optional<ModuleToc> ModuleToc::fromJson(const QByteArray& json, QString* er
 
 QString tocYaml(const QList<ModuleToc>& modules)
 {
-    // Section titles are YAML keys, so they must not repeat: each module is one section (two
-    // modules' "Guides" sections would collide), and a title already used gets the module's folder.
+    // Section titles are YAML keys, so they must not repeat: each module section is one contents
+    // section, and a title already used gets the module's folder.
     QStringList lines;
     lines << QStringLiteral("rootPage: %1").arg(IndexPage);
     lines << QStringLiteral("sections:");
@@ -758,14 +1102,16 @@ QString tocYaml(const QList<ModuleToc>& modules)
     lines << QStringLiteral("      %1: \"All Modules\"").arg(IndexPage);
     QStringList usedTitles{QStringLiteral("Overview")};
     for (const ModuleToc& module : modules) {
-        QString section = module.title;
-        if (usedTitles.contains(section)) {
-            section += QStringLiteral(" (%1)").arg(module.module);
-        }
-        usedTitles.append(section);
-        lines << QStringLiteral("  %1:").arg(yamlString(section)) << QStringLiteral("    pages:");
-        for (const auto& [path, title] : module.pages) {
-            lines << QStringLiteral("      %1: %2").arg(path, yamlString(title));
+        for (const TocSection& section : module.sections) {
+            QString key = section.title;
+            if (usedTitles.contains(key)) {
+                key += QStringLiteral(" (%1)").arg(module.module);
+            }
+            usedTitles.append(key);
+            lines << QStringLiteral("  %1:").arg(yamlString(key)) << QStringLiteral("    pages:");
+            for (const auto& [path, title] : section.pages) {
+                lines << QStringLiteral("      %1: %2").arg(path, yamlString(title));
+            }
         }
     }
     return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
@@ -780,15 +1126,128 @@ QString indexMarkdown(const QList<ModuleToc>& modules)
     lines << QStringLiteral("Reference documentation for the SonicDE libraries, generated from their source code. "
                             "Guides for using and developing SonicDE are in the [SonicDE Documentation](/docs).")
           << QString();
-    lines << QStringLiteral("## C++ Modules {#modules}") << QString();
-    for (const ModuleToc& module : modules) {
-        const QString target = (module.modulePage.isEmpty() ? module.pages.first().first : module.modulePage) + QStringLiteral(".md");
-        QString line = QStringLiteral("- [%1](%2)").arg(escape(module.title), target);
-        if (!module.description.isEmpty()) {
-            line += QStringLiteral(": ") + escape(module.description);
+
+    // Like Qt's "All Modules" page: C++ modules, then QML modules, each sorted by title.
+    for (const bool qml : {false, true}) {
+        QList<const TocSection*> sections;
+        for (const ModuleToc& module : modules) {
+            for (const TocSection& section : module.sections) {
+                if (section.qml == qml) {
+                    sections.append(&section);
+                }
+            }
         }
-        lines << line;
+        if (sections.isEmpty()) {
+            continue;
+        }
+        std::stable_sort(sections.begin(), sections.end(), [](const TocSection* a, const TocSection* b) {
+            return a->title.compare(b->title, Qt::CaseInsensitive) < 0;
+        });
+        lines << (qml ? QStringLiteral("## QML Modules {#qml-modules}") : QStringLiteral("## C++ Modules {#modules}")) << QString();
+        for (const TocSection* section : std::as_const(sections)) {
+            const QString target = (section->page.isEmpty() ? section->pages.first().first : section->page) + QStringLiteral(".md");
+            QString line = QStringLiteral("- [%1](%2)").arg(escape(section->title), target);
+            if (!section->description.isEmpty()) {
+                line += QStringLiteral(": ") + escape(section->description);
+            }
+            lines << line;
+        }
+        lines << QString();
     }
+    lines.removeLast();
     return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+}
+
+QList<std::pair<QString, QString>> membersPages(const QList<ModuleToc>& modules)
+{
+    QHash<QString, const ClassInfo*> byPage;
+    for (const ModuleToc& module : modules) {
+        for (const ClassInfo& info : module.classes) {
+            byPage.insert(info.page, &info);
+        }
+    }
+
+    QList<std::pair<QString, QString>> result;
+    for (const ModuleToc& module : modules) {
+        for (const ClassInfo& info : module.classes) {
+            // The class and its SonicDE bases, depth first, each once; Qt bases are only linked.
+            struct Entry {
+                Member member;
+                const ClassInfo* owner;
+            };
+            QList<Entry> entries;
+            QList<std::pair<QString, QString>> qtBases;
+            QSet<QString> visited;
+            std::function<void(const ClassInfo&)> collect = [&](const ClassInfo& current) {
+                visited.insert(current.page);
+                // Constructors and destructors aren't inherited.
+                const QString currentName = current.name.section(QStringLiteral("::"), -1);
+                for (const Member& member : current.members) {
+                    const bool special = member.name == currentName || member.name == QLatin1Char('~') + currentName;
+                    if (&current == &info || !special) {
+                        entries.append({member, &current});
+                    }
+                }
+                for (const auto& qtBase : current.qtBases) {
+                    if (!qtBases.contains(qtBase)) {
+                        qtBases.append(qtBase);
+                    }
+                }
+                for (const QString& base : current.bases) {
+                    if (visited.contains(base)) {
+                        continue;
+                    }
+                    if (const ClassInfo* baseInfo = byPage.value(base)) {
+                        collect(*baseInfo);
+                    } else {
+                        sonicInfo() << "The base class" << base << "of" << current.name << "isn't in the reference yet; its members are left out";
+                    }
+                }
+            };
+            collect(info);
+
+            // Constructors and the destructor first, then by name, as in Qt's lists.
+            const QString shortName = info.name.section(QStringLiteral("::"), -1);
+            const auto rank = [&shortName](const Member& member) {
+                return member.name == shortName ? 0 : member.name == QLatin1Char('~') + shortName ? 1
+                                                                                                  : 2;
+            };
+            std::stable_sort(entries.begin(), entries.end(), [&rank](const Entry& a, const Entry& b) {
+                if (rank(a.member) != rank(b.member)) {
+                    return rank(a.member) < rank(b.member);
+                }
+                const int byName = a.member.name.compare(b.member.name, Qt::CaseInsensitive);
+                return byName != 0 ? byName < 0 : a.member.signature < b.member.signature;
+            });
+
+            const QString ownModule = info.page.section(QLatin1Char('/'), 0, 0);
+            const auto relative = [&ownModule](const QString& page) {
+                const QString pageModule = page.section(QLatin1Char('/'), 0, 0);
+                const QString file = page.section(QLatin1Char('/'), 1) + QStringLiteral(".md");
+                return pageModule == ownModule ? file : QStringLiteral("../%1/%2").arg(pageModule, file);
+            };
+
+            const QString heading = QStringLiteral("List of All Members for %1").arg(info.name);
+            QStringList lines;
+            lines << QStringLiteral("---") << QStringLiteral("title: %1").arg(yamlString(heading))
+                  << QStringLiteral("description: %1").arg(yamlString(QStringLiteral("Every member of %1, including inherited members.").arg(info.name)))
+                  << QStringLiteral("parent: %1").arg(yamlString(info.page)) << QStringLiteral("---") << QString();
+            lines << QStringLiteral("# ") + escape(heading) << QString();
+            lines << QStringLiteral("This is the complete list of members for [%1](%2), including inherited members.").arg(escape(info.name), relative(info.page))
+                  << QString();
+            for (const Entry& entry : std::as_const(entries)) {
+                lines << QStringLiteral("- [%1](%2#%3)").arg(escape(entry.member.signature), relative(entry.owner->page), entry.member.anchor);
+            }
+            if (!qtBases.isEmpty()) {
+                QStringList links;
+                for (const auto& [name, url] : std::as_const(qtBases)) {
+                    links.append(QStringLiteral("[%1](%2)").arg(escape(name), url));
+                }
+                lines << QString() << QStringLiteral("%1 also inherits the members of %2.").arg(escape(info.name), links.join(QStringLiteral(", ")));
+            }
+            result.append({info.page + QStringLiteral("-members"), lines.join(QLatin1Char('\n')) + QLatin1Char('\n')});
+        }
+    }
+    return result;
 }
 }

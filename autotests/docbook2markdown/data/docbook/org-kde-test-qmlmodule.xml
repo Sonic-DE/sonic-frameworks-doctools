@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Joseph Crowell <joseph.w.crowell@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Test fixture shaped like QDoc's DocBook output for a QML module page. -->
+<db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
+<db:info>
+<db:title>Test QML Types</db:title>
+<db:productname>Qt</db:productname>
+<db:edition>Qt 6.31.0 Reference Documentation</db:edition>
+<db:abstract>
+<db:para>Types for testing in QML.</db:para>
+</db:abstract>
+</db:info>
+<db:anchor xml:id="details"/>
+<db:variablelist role="members">
+<db:varlistentry>
+<db:term><db:link xlink:href="qml-org-kde-test-testitem.xml" xlink:role="">TestItem</db:link></db:term>
+<db:listitem>
+<db:para>An item for testing.</db:para>
+</db:listitem>
+</db:varlistentry>
+</db:variablelist>
+</db:article>

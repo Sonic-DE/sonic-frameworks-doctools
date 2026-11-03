@@ -57,6 +57,17 @@ private:
         qFatal("no fixture page %s", qPrintable(slug));
     }
 
+    static QSet<QString> anchorsOf(const QString& markdown)
+    {
+        static const QRegularExpression anchors(QStringLiteral(R"(\{#([^}]+)\})"));
+        QSet<QString> ids;
+        auto found = anchors.globalMatch(markdown);
+        while (found.hasNext()) {
+            ids.insert(found.next().captured(1));
+        }
+        return ids;
+    }
+
     //! The lines of a "## <title>" section, up to the next "## " heading.
     static QStringList sectionLines(const QString& markdown, const QString& title)
     {
@@ -78,19 +89,152 @@ private Q_SLOTS:
     void everySummaryEntryLinksToAnAnchorOnThePage()
     {
         for (const Page& p : allPages()) {
-            static const QRegularExpression anchors(QStringLiteral(R"(\{#([^}]+)\})"));
-            QSet<QString> ids;
-            auto found = anchors.globalMatch(p.markdown);
-            while (found.hasNext()) {
-                ids.insert(found.next().captured(1));
-            }
-            static const QRegularExpression summaryLink(QStringLiteral(R"(^- \[.*\]\(#([^)]+)\))"), QRegularExpression::MultilineOption);
-            auto links = summaryLink.globalMatch(p.markdown);
-            while (links.hasNext()) {
-                const QString target = links.next().captured(1);
-                QVERIFY2(ids.contains(target), qPrintable(p.slug + QStringLiteral(": no anchor for #") + target));
+            for (const QString& markdown : {p.markdown, p.obsoleteMarkdown}) {
+                const QSet<QString> ids = anchorsOf(markdown);
+                static const QRegularExpression summaryLink(QStringLiteral(R"(^- \[.*\]\(#([^)]+)\))"), QRegularExpression::MultilineOption);
+                auto links = summaryLink.globalMatch(markdown);
+                while (links.hasNext()) {
+                    const QString target = links.next().captured(1);
+                    QVERIFY2(ids.contains(target), qPrintable(p.slug + QStringLiteral(": no anchor for #") + target));
+                }
             }
         }
+    }
+
+    void deprecatedMembersHaveTheirOwnPage()
+    {
+        const Page watcher = page(QStringLiteral("testwatcher"));
+        const QString obsolete = watcher.obsoleteMarkdown;
+        QVERIFY(obsolete.contains(QLatin1String("\n# Obsolete Members for TestWatcher\n")));
+        QVERIFY(obsolete.contains(QLatin1String("are deprecated.")));
+        QVERIFY(obsolete.contains(QLatin1String(" {#reset}\n")));
+        QVERIFY(obsolete.contains(QLatin1String("(#reset) (deprecated in 6.3)")));
+        QVERIFY(obsolete.contains(QLatin1String("parent: \"testmodule/testwatcher\"")));
+        // The class page keeps none of it, links to it, and its links to deprecated members follow them.
+        QVERIFY(!watcher.markdown.contains(QLatin1String("{#reset}")));
+        QVERIFY(!watcher.markdown.contains(QLatin1String("Obsolete")));
+        QVERIFY(watcher.markdown.contains(QLatin1String("[Deprecated members](testwatcher-obsolete.md)")));
+        QVERIFY(watcher.markdown.contains(QLatin1String("[reset](testwatcher-obsolete.md#reset)")));
+        // Links from the obsolete page to current members stay on the class page.
+        QVERIFY(obsolete.contains(QLatin1String("[reload](testwatcher.md#reload)")));
+
+        const Page base = page(QStringLiteral("testbase"));
+        QVERIFY(base.obsoleteMarkdown.isEmpty());
+        QVERIFY(!base.markdown.contains(QLatin1String("Deprecated members")));
+    }
+
+    void classPagesLinkTheirMembersPage()
+    {
+        for (const Page& p : allPages()) {
+            const bool links = p.markdown.contains(QStringLiteral("](%1-members.md)").arg(p.slug));
+            QCOMPARE(links, p.classInfo.has_value());
+        }
+    }
+
+    void membersPagesListOwnAndInheritedMembers()
+    {
+        const ModuleToc toc = converter().moduleToc(allPages());
+        const auto pages = membersPages({toc});
+        QCOMPARE(pages.size(), toc.classes.size());
+
+        QHash<QString, QString> byPath;
+        for (const auto& [path, markdown] : pages) {
+            byPath.insert(path, markdown);
+        }
+        // Every member of the class and of its SonicDE bases is listed, linked to its anchor on its page.
+        for (const ClassInfo& info : toc.classes) {
+            const QString markdown = byPath.value(info.page + QStringLiteral("-members"));
+            QVERIFY2(!markdown.isEmpty(), qPrintable(info.page));
+            QVERIFY(markdown.contains(QStringLiteral("parent: \"%1\"").arg(info.page)));
+            QList<const ClassInfo*> chain{&info};
+            for (const QString& base : info.bases) {
+                for (const ClassInfo& other : toc.classes) {
+                    if (other.page == base) {
+                        chain.append(&other);
+                    }
+                }
+            }
+            for (const ClassInfo* owner : std::as_const(chain)) {
+                const Page ownerPage = page(owner->page.section(QLatin1Char('/'), 1));
+                const QSet<QString> anchors = anchorsOf(ownerPage.markdown);
+                const QString ownerName = owner->name.section(QStringLiteral("::"), -1);
+                for (const Member& member : owner->members) {
+                    QVERIFY2(anchors.contains(member.anchor), qPrintable(ownerPage.slug + QStringLiteral(": no anchor for #") + member.anchor));
+                    // A base's constructors and destructor aren't inherited.
+                    const bool special = member.name == ownerName || member.name == QLatin1Char('~') + ownerName;
+                    const bool listed = markdown.contains(QStringLiteral("](%1.md#%2)").arg(ownerPage.slug, member.anchor));
+                    QVERIFY2(listed == (owner == &info || !special), qPrintable(info.name + QStringLiteral(": ") + member.signature));
+                }
+            }
+        }
+
+        const QString watcher = byPath.value(QStringLiteral("testmodule/testwatcher-members"));
+        QVERIFY(watcher.contains(QLatin1String("](testbase.md#entries)")));
+        // Qt bases, also through SonicDE ones, are linked; deprecated members aren't listed.
+        QVERIFY(watcher.contains(QLatin1String("[QObject](https://doc.qt.io/qt-6/qobject-members.html)")));
+        QVERIFY(!watcher.contains(QLatin1String("#reset)")));
+        // The constructor comes first.
+        static const QRegularExpression firstEntry(QStringLiteral(R"(^- \[([^\]]*)\])"), QRegularExpression::MultilineOption);
+        QVERIFY(firstEntry.match(watcher).captured(1).startsWith(QLatin1String("TestWatcher(")));
+    }
+
+    void memberSignaturesLookLikeQtsLists()
+    {
+        const ModuleToc toc = converter().moduleToc(allPages());
+        QHash<QString, QString> signatures;
+        for (const ClassInfo& info : toc.classes) {
+            for (const Member& member : info.members) {
+                signatures.insert(member.anchor, member.signature);
+            }
+        }
+        // No parameter names, default arguments, tags, qualifiers or "void"; return types after a colon.
+        QCOMPARE(signatures.value(QStringLiteral("changed")), QStringLiteral("changed(const QByteArrayList &)"));
+        QCOMPARE(signatures.value(QStringLiteral("config")), QStringLiteral("config() const : TestConfig"));
+        QCOMPARE(signatures.value(QStringLiteral("create")), QStringLiteral("create(const TestConfig &) : TestWatcher *"));
+        QCOMPARE(signatures.value(QStringLiteral("entries")), QStringLiteral("entries(const QStringList &, const QSize &) const : QMap<QString, QVariant>"));
+        QCOMPARE(signatures.value(QStringLiteral("operator-eq-eq")), QStringLiteral("operator==(const TestBase &) const : bool"));
+        QCOMPARE(signatures.value(QStringLiteral("dtor.TestBase")), QStringLiteral("~TestBase()"));
+        QCOMPARE(signatures.value(QStringLiteral("interval-prop")), QStringLiteral("interval : int"));
+        // A nested class's members are qualified only with the inner class name.
+        QCOMPARE(signatures.value(QStringLiteral("Item")), QStringLiteral("Item(bool &, bool)"));
+
+        // So its constructor still comes first in its list.
+        for (const auto& [path, markdown] : membersPages({toc})) {
+            if (path == QLatin1String("testmodule/testbase-item-members")) {
+                static const QRegularExpression firstEntry(QStringLiteral(R"(^- \[([^\]]*)\])"), QRegularExpression::MultilineOption);
+                QCOMPARE(firstEntry.match(markdown).captured(1), QStringLiteral("Item(bool &, bool)"));
+            }
+        }
+    }
+
+    void qmlPagesFormTheirOwnSection()
+    {
+        const ModuleToc toc = converter().moduleToc(allPages());
+        QCOMPARE(toc.sections.size(), 2);
+        const TocSection& cpp = toc.sections.at(0);
+        const TocSection& qml = toc.sections.at(1);
+        QVERIFY(!cpp.qml);
+        QVERIFY(qml.qml);
+        QCOMPARE(qml.page, QStringLiteral("testmodule/org-kde-test-qmlmodule"));
+        QCOMPARE(qml.title, QStringLiteral("Test QML Types"));
+        for (const auto& [path, title] : cpp.pages) {
+            QVERIFY2(!path.contains(QLatin1String("/qml-")) && !path.endsWith(QLatin1String("-qmlmodule")), qPrintable(path));
+        }
+        QVERIFY(qml.pages.contains(std::pair(QStringLiteral("testmodule/qml-org-kde-test-testitem"), QStringLiteral("TestItem"))));
+
+        const QString index = indexMarkdown({toc});
+        QVERIFY(index.indexOf(QLatin1String("## C++ Modules")) < index.indexOf(QLatin1String("## QML Modules")));
+        QVERIFY(index.contains(QLatin1String("- [Test QML Types](testmodule/org-kde-test-qmlmodule.md): Types for testing in QML.")));
+    }
+
+    void moreLinksOnlyWhereThereIsADetailedDescription()
+    {
+        for (const Page& p : allPages()) {
+            const bool hasDetails = p.markdown.contains(QLatin1String("{#details}\n"));
+            QCOMPARE(p.markdown.contains(QLatin1String("[More...](#details)")), hasDetails);
+        }
+        // The QML module page's "details" is a bare anchor, not a Detailed Description.
+        QVERIFY(!page(QStringLiteral("org-kde-test-qmlmodule")).markdown.contains(QLatin1String("More...")));
     }
 
     void memberTagsChooseTheSummarySection()
@@ -139,7 +283,8 @@ private Q_SLOTS:
     {
         const QString markdown = page(QStringLiteral("testwatcher")).markdown;
         QVERIFY(markdown.contains(QLatin1String("- **Header:** `#include <TestWatcher>`")));
-        QVERIFY(markdown.contains(QLatin1String("- **Inherits:** [QObject](https://doc.qt.io/qt-6/qobject.html)")));
+        QVERIFY(markdown.contains(QLatin1String("- **Inherits:** [TestBase](testbase.md)")));
+        QVERIFY(page(QStringLiteral("testbase")).markdown.contains(QLatin1String("- **Inherits:** [QObject](https://doc.qt.io/qt-6/qobject.html)")));
         static const QRegularExpression emptyRow(QStringLiteral(R"(^- \*\*[^*]+:\*\*\s*$)"), QRegularExpression::MultilineOption);
         QVERIFY(!emptyRow.match(markdown).hasMatch());
         QVERIFY(!markdown.contains(QLatin1String("Inherited By")));
@@ -189,20 +334,23 @@ private Q_SLOTS:
         QVERIFY(markdown.startsWith(QLatin1String("---\ntitle: \"TestWatcher Class\"\ndescription: \"Watches a TestConfig for changes.\"\n---\n")));
     }
 
-    void moduleTocListsEveryPageWithTheModulePageFirst()
+    void moduleTocListsEveryPageOnceWithTheModulePagesFirst()
     {
         const QList<Page> pages = allPages();
         const ModuleToc toc = converter().moduleToc(pages);
-        QCOMPARE(toc.pages.size(), pages.size());
-        QCOMPARE(toc.pages.first().first, toc.modulePage);
-        QVERIFY(toc.modulePage.endsWith(QLatin1String("-module")));
-        QVERIFY(!toc.description.isEmpty());
-        for (const Page& p : pages) {
-            QVERIFY2(std::any_of(toc.pages.cbegin(), toc.pages.cend(), [&p](const auto& entry) {
-                return entry.first == QStringLiteral("testmodule/") + p.slug;
-            }),
-                qPrintable(p.slug));
+        QStringList paths;
+        for (const TocSection& section : toc.sections) {
+            QVERIFY(!section.description.isEmpty());
+            QCOMPARE(section.pages.first().first, section.page);
+            for (const auto& [path, title] : section.pages) {
+                paths.append(path);
+            }
         }
+        QCOMPARE(paths.size(), pages.size());
+        for (const Page& p : pages) {
+            QVERIFY2(paths.contains(QStringLiteral("testmodule/") + p.slug), qPrintable(p.slug));
+        }
+        QVERIFY(toc.sections.first().page.endsWith(QLatin1String("-module")));
     }
 
     void moduleTocSurvivesItsJson()
@@ -212,10 +360,29 @@ private Q_SLOTS:
         const auto read = ModuleToc::fromJson(toc.toJson(), &error);
         QVERIFY2(read, qPrintable(error));
         QCOMPARE(read->module, toc.module);
-        QCOMPARE(read->title, toc.title);
-        QCOMPARE(read->description, toc.description);
-        QCOMPARE(read->modulePage, toc.modulePage);
-        QCOMPARE(read->pages, toc.pages);
+        QCOMPARE(read->sections.size(), toc.sections.size());
+        for (qsizetype i = 0; i < toc.sections.size(); ++i) {
+            QCOMPARE(read->sections.at(i).title, toc.sections.at(i).title);
+            QCOMPARE(read->sections.at(i).description, toc.sections.at(i).description);
+            QCOMPARE(read->sections.at(i).page, toc.sections.at(i).page);
+            QCOMPARE(read->sections.at(i).qml, toc.sections.at(i).qml);
+            QCOMPARE(read->sections.at(i).pages, toc.sections.at(i).pages);
+        }
+        QCOMPARE(read->classes.size(), toc.classes.size());
+        for (qsizetype i = 0; i < toc.classes.size(); ++i) {
+            const ClassInfo& a = read->classes.at(i);
+            const ClassInfo& b = toc.classes.at(i);
+            QCOMPARE(a.page, b.page);
+            QCOMPARE(a.name, b.name);
+            QCOMPARE(a.bases, b.bases);
+            QCOMPARE(a.qtBases, b.qtBases);
+            QCOMPARE(a.members.size(), b.members.size());
+            for (qsizetype m = 0; m < b.members.size(); ++m) {
+                QCOMPARE(a.members.at(m).name, b.members.at(m).name);
+                QCOMPARE(a.members.at(m).signature, b.members.at(m).signature);
+                QCOMPARE(a.members.at(m).anchor, b.members.at(m).anchor);
+            }
+        }
 
         QVERIFY(!ModuleToc::fromJson(QByteArrayLiteral("{\"module\": \"x\"}"), &error));
         QVERIFY(!ModuleToc::fromJson(QByteArrayLiteral("not json"), &error));
@@ -223,12 +390,14 @@ private Q_SLOTS:
 
     void referenceTocHasTheIndexAsRootAndUniqueModuleSections()
     {
-        // Two modules with the same pages and the same title, under different folders.
+        // Two modules with the same pages and the same titles, under different folders.
         const ModuleToc first = converter().moduleToc(allPages());
         ModuleToc second = first;
         second.module = QStringLiteral("othermodule");
-        for (auto& entry : second.pages) {
-            entry.first.replace(QLatin1String("testmodule/"), QLatin1String("othermodule/"));
+        for (TocSection& section : second.sections) {
+            for (auto& entry : section.pages) {
+                entry.first.replace(QLatin1String("testmodule/"), QLatin1String("othermodule/"));
+            }
         }
         const QString toc = tocYaml({first, second});
 
@@ -242,10 +411,12 @@ private Q_SLOTS:
                 sections.append(line);
             }
         }
-        QCOMPARE(sections.size(), 3);
+        QCOMPARE(sections.size(), 1 + first.sections.size() + second.sections.size());
         for (const ModuleToc& module : {first, second}) {
-            for (const auto& [path, title] : module.pages) {
-                QVERIFY2(toc.contains(QStringLiteral("      %1: ").arg(path)), qPrintable(path));
+            for (const TocSection& section : module.sections) {
+                for (const auto& [path, title] : section.pages) {
+                    QVERIFY2(toc.contains(QStringLiteral("      %1: ").arg(path)), qPrintable(path));
+                }
             }
         }
     }
@@ -255,7 +426,9 @@ private Q_SLOTS:
         const ModuleToc toc = converter().moduleToc(allPages());
         const QString index = indexMarkdown({toc});
         QVERIFY(index.startsWith(QLatin1String("---\ntitle: ")));
-        QVERIFY2(index.contains(QStringLiteral("](%1.md): %2").arg(toc.modulePage, toc.description)), qPrintable(index));
+        for (const TocSection& section : toc.sections) {
+            QVERIFY2(index.contains(QStringLiteral("](%1.md): %2").arg(section.page, section.description)), qPrintable(index));
+        }
         QVERIFY(index.contains(QLatin1String("](/docs)")));
     }
 

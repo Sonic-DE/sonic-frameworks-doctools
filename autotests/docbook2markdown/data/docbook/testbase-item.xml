@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Joseph Crowell <joseph.w.crowell@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Test fixture shaped like QDoc's DocBook output for a nested class: member headings name only the inner class. -->
+<db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
+<db:info>
+<db:title>TestBase::Item Class</db:title>
+<db:productname>Qt</db:productname>
+<db:edition>Qt 6.31.0 Reference Documentation</db:edition>
+<db:abstract>
+<db:para>An item of a base.</db:para>
+</db:abstract>
+</db:info>
+<db:variablelist>
+<db:varlistentry>
+<db:term>Header</db:term>
+<db:listitem>
+<db:para>TestBase</db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>Inherits</db:term>
+<db:listitem>
+<db:para><db:link xlink:href="testbase.xml" xlink:role="class">TestBase</db:link></db:para>
+</db:listitem>
+</db:varlistentry>
+</db:variablelist>
+<db:section xml:id="member-function-documentation">
+<db:title>Member Function Documentation</db:title>
+<db:section xml:id="Item">
+<db:title>Item::Item(bool &amp;<db:emphasis>reference</db:emphasis>, bool <db:emphasis>defaultValue</db:emphasis> = true)</db:title>
+<db:para>Constructs an item.</db:para>
+</db:section>
+</db:section>
+</db:article>

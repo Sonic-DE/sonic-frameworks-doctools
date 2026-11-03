@@ -70,8 +70,8 @@ int main(int argc, char** argv)
     QCommandLineParser parser;
     parser.setApplicationDescription(
         QStringLiteral("Converts one module's QDoc DocBook output into Markdown pages for the Winter CMS docs plugin. "
-                       "Run it once per module with the same output directory: each run also rewrites toc.yaml and "
-                       "index.md for every module converted there."));
+                       "Run it once per module with the same output directory: each run also rewrites toc.yaml, "
+                       "index.md and the all-members pages for every module converted there."));
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption moduleOption(QStringLiteral("module"), QStringLiteral("Folder name for the module's pages, e.g. kconfigcore (required)."), QStringLiteral("name"));
@@ -85,7 +85,8 @@ int main(int argc, char** argv)
         options.qtDocsUrl);
     parser.addOptions({moduleOption, qtDocsDirOption, qtDocsUrlOption});
     parser.addPositionalArgument(QStringLiteral("docbook-dir"), QStringLiteral("QDoc's DocBook output directory (one .xml file per page)."));
-    parser.addPositionalArgument(QStringLiteral("output-dir"), QStringLiteral("Where to write <module>/<page>.md, <module>/module.json, toc.yaml and index.md."));
+    parser.addPositionalArgument(QStringLiteral("output-dir"), QStringLiteral("Where to write <module>/<page>.md (classes also get <page>-members.md and, with deprecated members, "
+                                                                              "<page>-obsolete.md), <module>/module.json, toc.yaml and index.md."));
     parser.process(app);
 
     const QStringList positional = parser.positionalArguments();
@@ -136,6 +137,9 @@ int main(int argc, char** argv)
         if (!writeFile(moduleDir + QLatin1Char('/') + page->slug + QStringLiteral(".md"), page->markdown)) {
             return 1;
         }
+        if (!page->obsoleteMarkdown.isEmpty() && !writeFile(moduleDir + QLatin1Char('/') + page->slug + QStringLiteral("-obsolete.md"), page->obsoleteMarkdown)) {
+            return 1;
+        }
         pages.append(*page);
     }
 
@@ -164,14 +168,21 @@ int main(int argc, char** argv)
     }
     // By title, then folder, so the order doesn't depend on the directory listing.
     std::sort(modules.begin(), modules.end(), [](const auto& a, const auto& b) {
-        const int byTitle = a.title.compare(b.title, Qt::CaseInsensitive);
+        const int byTitle = a.title().compare(b.title(), Qt::CaseInsensitive);
         return byTitle != 0 ? byTitle < 0 : a.module < b.module;
     });
     if (!writeFile(output + QStringLiteral("/toc.yaml"), DocBook2Markdown::tocYaml(modules))
         || !writeFile(output + QLatin1Char('/') + DocBook2Markdown::IndexPage + QStringLiteral(".md"), DocBook2Markdown::indexMarkdown(modules))) {
         return 1;
     }
+    // All-members pages include inherited members from other modules, so every module's are rewritten.
+    const auto membersPages = DocBook2Markdown::membersPages(modules);
+    for (const auto& [path, markdown] : membersPages) {
+        if (!writeFile(output + QLatin1Char('/') + path + QStringLiteral(".md"), markdown)) {
+            return 1;
+        }
+    }
 
-    sonicInfo() << "Wrote the reference's toc.yaml and index page for" << modules.size() << "modules";
+    sonicInfo() << "Wrote the reference's toc.yaml, index page and" << membersPages.size() << "all-members pages for" << modules.size() << "modules";
     return 0;
 }
