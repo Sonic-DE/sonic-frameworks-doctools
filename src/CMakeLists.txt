@@ -24,15 +24,12 @@ else()
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${_custom_dtd_kdex}.install" DESTINATION ${KDE_INSTALL_DATADIR_KF}/kdoctools/customization/dtd RENAME ${_custom_dtd_kdex_name})
 endif()
 
-ecm_qt_declare_logging_category(kdoctoolslog_core_SRCS
-    HEADER loggingcategory.h
-    IDENTIFIER KDocToolsLog
-    CATEGORY_NAME kf.doctools.core
-    DEFAULT_SEVERITY Warning
-)
+# Logging goes through Sonic::Logging. Each binary declares its component in exactly one .cpp:
+# the library in doctoolslogging.cpp, each program in its main file. xslt.cpp and xslt_kde.cpp are
+# compiled into both the library and meinproc6, so they declare none.
 
 # needed by KIO, need to export it
-add_library(KF6DocTools SHARED xslt.cpp xslt_kde.cpp ${kdoctoolslog_core_SRCS})
+add_library(KF6DocTools SHARED xslt.cpp xslt_kde.cpp doctoolslogging.cpp)
 add_library(KF6::DocTools ALIAS KF6DocTools)
 
 set_target_properties(KF6DocTools PROPERTIES
@@ -65,6 +62,7 @@ target_link_libraries(KF6DocTools
         ${LIBXSLT_LIBRARIES}
         ${LIBXSLT_EXSLT_LIBRARIES}
         ${_private_link_karchive}
+        Sonic::Logging
 )
 
 target_include_directories(KF6DocTools INTERFACE "$<INSTALL_INTERFACE:${KDE_INSTALL_INCLUDEDIR_KF}/KDocTools>")
@@ -95,11 +93,12 @@ else ()
     set(meinproc_additional_LIBS KF6::Archive)
 endif()
 
-add_executable(meinproc6 meinproc.cpp meinproc_common.cpp xslt.cpp ${meinproc_additional_SRCS} ${kdoctoolslog_core_SRCS})
+add_executable(meinproc6 meinproc.cpp meinproc_common.cpp xslt.cpp ${meinproc_additional_SRCS})
 ecm_mark_nongui_executable(meinproc6)
 target_link_libraries(meinproc6
     PRIVATE
         Qt6::Core
+        Sonic::Logging
         ${LIBXML2_LIBRARIES}
         ${LIBXSLT_LIBRARIES}
         ${LIBXSLT_EXSLT_LIBRARIES}
@@ -198,10 +197,10 @@ endforeach(_currentcustomizedir ${customizedir})
 
 ########### l10n xml helper ###############
 
-set( docbookl10nhelper_SRCS docbookl10nhelper.cpp ${kdoctoolslog_core_SRCS})
+set( docbookl10nhelper_SRCS docbookl10nhelper.cpp )
 add_executable( docbookl10nhelper ${docbookl10nhelper_SRCS} )
 ecm_mark_nongui_executable( docbookl10nhelper )
-target_link_libraries( docbookl10nhelper Qt6::Core )
+target_link_libraries( docbookl10nhelper Qt6::Core Sonic::Logging )
 if(INSTALL_INTERNAL_TOOLS)
     install(TARGETS docbookl10nhelper EXPORT KF6DocToolsToolsTargets ${KF_INSTALL_TARGETS_DEFAULT_ARGS})
 endif()
@@ -225,10 +224,10 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/customization/xsl/all-l10n.xml
 
 ########### checkXML6 helper ###############
 
-set( checkXML6_SRCS checkXML6.cpp ${kdoctoolslog_core_SRCS})
+set( checkXML6_SRCS checkXML6.cpp )
 add_executable( checkXML6 ${checkXML6_SRCS} )
 ecm_mark_nongui_executable( checkXML6 )
-target_link_libraries( checkXML6 Qt6::Core )
+target_link_libraries( checkXML6 Qt6::Core Sonic::Logging )
 install(TARGETS checkXML6 EXPORT KF6DocToolsToolsTargets ${KF_INSTALL_TARGETS_DEFAULT_ARGS})
 
 if(CMAKE_CROSSCOMPILING AND CHECKXML6_EXECUTABLE)

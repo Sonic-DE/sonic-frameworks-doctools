@@ -2,8 +2,9 @@
 #include "../config-kdoctools.h"
 #include "docbookxslt.h"
 #include "docbookxslt_p.h"
-#include "loggingcategory.h"
 #include "meinproc_common.h"
+
+#include <Sonic/Logging/Logging>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -32,21 +33,27 @@
 #include <qplatformdefs.h>
 #include <string.h>
 
+SONIC_LOGGING_COMPONENT("org.sonicde.frameworks.doctools.meinproc");
+
 using namespace KDocTools;
 
 #ifndef _WIN32
 extern "C" int xmlLoadExtDtdDefaultValue;
 #endif
 
-#define DIE(x)                                                                                                                                                 \
-    do {                                                                                                                                                       \
-        qCCritical(KDocToolsLog) << "Error:" << x;                                                                                                             \
-        exit(1);                                                                                                                                               \
+#define DIE(x)                            \
+    do {                                  \
+        sonicCritical() << "Error:" << x; \
+        exit(1);                          \
     } while (0)
 
 int main(int argc, char **argv)
 {
     // xsltSetGenericDebugFunc(stderr, NULL);
+
+    // meinproc6 runs inside handbook and package builds: no log file (root builds would write
+    // /var/log/sonic), so every line goes to stderr, where the build reads it, and to journald.
+    Sonic::Logging::install({.writeLogFile = false});
 
     QCoreApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("meinproc"));
@@ -157,7 +164,7 @@ int main(int argc, char **argv)
     const QString cache = parser.value(QStringLiteral("cache"));
 #else
     if (parser.isSet("cache")) {
-        qCWarning(KDocToolsLog) << QCoreApplication::translate(
+        sonicWarning() << QCoreApplication::translate(
             "main",
             "The cache option is not available, please re-compile with KArchive support. See MEINPROC_NO_KARCHIVE in KDocTools");
     }
@@ -174,7 +181,7 @@ int main(int argc, char **argv)
 #ifndef MEINPROC_NO_KARCHIVE
     if (!cache.isEmpty()) {
         if (!saveToCache(output, cache)) {
-            qCWarning(KDocToolsLog) << QCoreApplication::translate("main", "Could not write to cache file %1.").arg(cache);
+            sonicWarning() << QCoreApplication::translate("main", "Could not write to cache file %1.").arg(cache);
         }
         goto end;
     }

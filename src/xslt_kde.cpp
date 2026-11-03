@@ -2,7 +2,8 @@
 #ifndef MEINPROC_NO_KARCHIVE
 #include <KCompressionDevice>
 #else
-#include "loggingcategory.h"
+// Compiled into both KF6DocTools and meinproc6: logs under whichever binary's component, declares none.
+#include <Sonic/Logging/Log>
 #endif
 
 bool KDocTools::saveToCache(const QString &contents, const QString &filename)
@@ -17,8 +18,8 @@ bool KDocTools::saveToCache(const QString &contents, const QString &filename)
     fd.write(contents.toUtf8());
     fd.close();
 #else
-    qCWarning(KDocToolsLog) << "This function is dummy because KArchive support has been disabled. "
-                               "This mode should be enabled only for specific usage on KDE infrastructure.";
+    sonicWarning() << "This function is dummy because KArchive support has been disabled. "
+                      "This mode should be enabled only for specific usage on KDE infrastructure.";
     Q_UNUSED(contents)
     Q_UNUSED(filename)
 #endif

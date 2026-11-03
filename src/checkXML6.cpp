@@ -5,27 +5,33 @@
     SPDX-License-Identifier: LGPL-2.1-only OR LGPL-3.0-only OR LicenseRef-KDE-Accepted-LGPL
 */
 
-#include "loggingcategory.h"
-
 #include <QCoreApplication>
 #include <QProcess>
 #include <QStandardPaths>
 
+#include <Sonic/Logging/Logging>
+
 #include <stdio.h>
+
+SONIC_LOGGING_COMPONENT("org.sonicde.frameworks.doctools.checkxml");
 
 int main(int argc, char **argv)
 {
+    // Runs inside builds: no log file (root builds would write /var/log/sonic), so every line goes
+    // to stderr, where the build reads it, and to journald.
+    Sonic::Logging::install({.writeLogFile = false});
+
     QCoreApplication app(argc, argv);
 
     const QStringList arguments = app.arguments();
     if (arguments.count() != 2) {
-        qCCritical(KDocToolsLog) << "wrong argument count";
+        sonicCritical() << "wrong argument count";
         return (1);
     }
 
     const QString exec = QStandardPaths::findExecutable(QStringLiteral("meinproc6"));
     if (exec.isEmpty()) {
-        qCCritical(KDocToolsLog) << "Could not find meinproc6 executable in PATH";
+        sonicCritical() << "Could not find meinproc6 executable in PATH";
         return 1;
     }
 
