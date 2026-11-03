@@ -28,17 +28,48 @@ private:
         return Converter(options);
     }
 
+    //! The structs and unions of the fixture module's QDoc index.
+    static QHash<QString, IndexAggregate> indexAggregates()
+    {
+        QFile file(QStringLiteral(DATA_DIR "/index/testmodule.index"));
+        if (!file.open(QIODevice::ReadOnly)) {
+            qFatal("can't read fixture %s", qPrintable(file.fileName()));
+        }
+        QString error;
+        const auto aggregates = Converter::indexAggregates(file.readAll(), &error);
+        if (!aggregates) {
+            qFatal("fixture %s didn't parse: %s", qPrintable(file.fileName()), qPrintable(error));
+        }
+        return *aggregates;
+    }
+
+    //! The fixture pages, converted as the program does: knowing every page's anchors and the index's structs.
     QList<Page> allPages() const
     {
-        QList<Page> pages;
         const QDir dir(QStringLiteral(DATA_DIR "/docbook"));
+        QHash<QString, QByteArray> contents;
+        QHash<QString, PageAnchors> anchors;
         for (const QString& name : dir.entryList({QStringLiteral("*.xml")}, QDir::Files, QDir::Name)) {
             QFile file(dir.filePath(name));
             if (!file.open(QIODevice::ReadOnly)) {
                 qFatal("can't read fixture %s", qPrintable(file.fileName()));
             }
+            contents.insert(name.chopped(4), file.readAll());
             QString error;
-            const auto page = converter().convert(name.chopped(4), file.readAll(), &error);
+            const auto pageAnchors = Converter::pageAnchors(contents.value(name.chopped(4)), &error);
+            if (!pageAnchors) {
+                qFatal("fixture %s didn't parse: %s", qPrintable(name), qPrintable(error));
+            }
+            anchors.insert(name.chopped(4), *pageAnchors);
+        }
+        Converter moduleConverter = converter();
+        moduleConverter.setModuleAnchors(anchors);
+        moduleConverter.setIndexAggregates(indexAggregates());
+
+        QList<Page> pages;
+        for (const QString& name : dir.entryList({QStringLiteral("*.xml")}, QDir::Files, QDir::Name)) {
+            QString error;
+            const auto page = moduleConverter.convert(name.chopped(4), contents.value(name.chopped(4)), &error);
             if (!page) {
                 qFatal("fixture %s didn't convert: %s", qPrintable(name), qPrintable(error));
             }
@@ -290,6 +321,62 @@ private Q_SLOTS:
         QVERIFY(!markdown.contains(QLatin1String("Inherited By")));
     }
 
+    void membersDocumentedTogetherEachGetAnAnchorAndEntry()
+    {
+        // QDoc writes the second \fn of a shared comment as an anchored bridgehead under the first.
+        const Page base = page(QStringLiteral("testbase"));
+        QVERIFY(base.markdown.contains(QLatin1String("### void TestBase::setLimit(const int &*value*) {#setLimit}\n\n"
+                                                     "### int TestBase::limit() const {#limit}\n\nThe property limit.")));
+        const QStringList functions = sectionLines(base.markdown, QStringLiteral("Public Functions"));
+        QVERIFY(functions.contains(QLatin1String("- [int limit() const](#limit)")));
+        QVERIFY(functions.contains(QLatin1String("- [void setLimit(const int &value)](#setLimit)")));
+        QStringList anchors;
+        for (const Member& member : base.classInfo->members) {
+            anchors.append(member.anchor);
+        }
+        QVERIFY(anchors.contains(QLatin1String("limit")));
+        QVERIFY(anchors.contains(QLatin1String("setLimit")));
+    }
+
+    void namespacePagesFormatTheirRequirements()
+    {
+        const QString markdown = page(QStringLiteral("outer-testns")).markdown;
+        QVERIFY(markdown.contains(QLatin1String("- **Header:** `#include <Outer/TestNs>`\n"
+                                                "- **CMake:** `find_package(OuterTest REQUIRED)`  \n"
+                                                "  `target_link_libraries(mytarget PRIVATE Outer::Test)`")));
+        // Namespaces have no all-members page.
+        QVERIFY(!markdown.contains(QLatin1String("-members.md")));
+    }
+
+    void structsGetTheirTitleAndLinksFromTheIndex()
+    {
+        const QHash<QString, IndexAggregate> aggregates = indexAggregates();
+        QCOMPARE(aggregates.size(), 1);
+        QCOMPARE(aggregates.value(QStringLiteral("outer-testns-settings")).fullName, QStringLiteral("Outer::TestNs::Settings"));
+
+        // Every page has a title, structs one like Qt's HTML pages, and they are laid out like classes.
+        for (const Page& p : allPages()) {
+            QVERIFY2(!p.title.isEmpty(), qPrintable(p.slug));
+        }
+        const Page settings = page(QStringLiteral("outer-testns-settings"));
+        QCOMPARE(settings.title, QStringLiteral("Outer::TestNs::Settings Struct"));
+        QVERIFY(settings.classInfo);
+        QCOMPARE(settings.classInfo->name, QStringLiteral("Outer::TestNs::Settings"));
+        QVERIFY(settings.markdown.contains(QLatin1String("- **Header:** `#include <Outer/TestNs>`")));
+        QVERIFY(settings.markdown.contains(QLatin1String("[List of all members, including inherited members](outer-testns-settings-members.md)")));
+        // Its variables are its members, shown as Qt's members lists show them.
+        QStringList members;
+        for (const Member& member : settings.classInfo->members) {
+            members.append(member.signature + QLatin1Char('#') + member.anchor);
+        }
+        QCOMPARE(members, (QStringList{QStringLiteral("interval : int#interval-var"), QStringLiteral("label : const char *#label-var")}));
+
+        // The namespace's class list links the struct, as it links classes.
+        const QString markdown = page(QStringLiteral("outer-testns")).markdown;
+        QVERIFY(markdown.contains(QLatin1String("### class [TestBase](testbase.md)")));
+        QVERIFY(markdown.contains(QLatin1String("### struct [TestNs::Settings](outer-testns-settings.md)\n\nWhat a watcher starts with.")));
+    }
+
     void seeAlsoIsAParagraphAndEmphasisHasNoInnerEdgeSpaces()
     {
         for (const Page& p : allPages()) {
@@ -302,7 +389,8 @@ private Q_SLOTS:
                 QVERIFY2(!badEmphasis.match(line).hasMatch(), qPrintable(p.slug + QStringLiteral(": ") + line));
             }
         }
-        QVERIFY(page(QStringLiteral("testwatcher")).markdown.contains(QLatin1String("*See also* [TestConfig](testconfig.md), [the specification](https://example.org/spec)")));
+        // (TestConfig has no page among the fixtures, so it is plain text.)
+        QVERIFY(page(QStringLiteral("testwatcher")).markdown.contains(QLatin1String("*See also* TestConfig, [the specification](https://example.org/spec)")));
     }
 
     void qdocBrandingIsDropped()
@@ -439,6 +527,81 @@ private Q_SLOTS:
         QVERIFY(!error.isEmpty());
         QVERIFY(!converter().convert(QStringLiteral("html"), QByteArrayLiteral("<html><body/></html>"), &error));
         QVERIFY(error.contains(QLatin1String("not a DocBook document")));
+    }
+
+    void linksFollowTheModulesPagesAndAnchors()
+    {
+        const QString markdown = page(QStringLiteral("testbase")).markdown;
+        // A deprecated member of another page is on that page's deprecated-members page.
+        QVERIFY(markdown.contains(QLatin1String("[TestWatcher::reset](testwatcher-obsolete.md#reset)")));
+        // A page QDoc wrote no file for, and an example's source file, leave only the text.
+        QVERIFY(markdown.contains(QLatin1String("unlike MissingClass.")));
+        QVERIFY(markdown.contains(QLatin1String("and Example/main.cpp.")));
+        // A missing anchor links to its page, or is plain text on the page itself.
+        QVERIFY(markdown.contains(QLatin1String("[nosuchproperty](testwatcher.md),")));
+        QVERIFY(markdown.contains(QLatin1String(", ownmissing and")));
+
+        // Every link into this module ends at a page and anchor that exist.
+        QHash<QString, QSet<QString>> anchors;
+        const QList<Page> pages = allPages();
+        for (const Page& p : pages) {
+            anchors.insert(p.slug + QStringLiteral(".md"), anchorsOf(p.markdown));
+            if (!p.obsoleteMarkdown.isEmpty()) {
+                anchors.insert(p.slug + QStringLiteral("-obsolete.md"), anchorsOf(p.obsoleteMarkdown));
+            }
+        }
+        static const QRegularExpression localLink(QStringLiteral(R"(\]\(([a-z0-9-]+\.md)(?:#([^)]+))?\))"));
+        for (const Page& p : pages) {
+            for (const QString& markdown : {p.markdown, p.obsoleteMarkdown}) {
+                auto links = localLink.globalMatch(markdown);
+                while (links.hasNext()) {
+                    const QRegularExpressionMatch link = links.next();
+                    // All-members pages are written later, from module.json.
+                    if (link.captured(1).endsWith(QLatin1String("-members.md"))) {
+                        continue;
+                    }
+                    QVERIFY2(anchors.contains(link.captured(1)), qPrintable(p.slug + QStringLiteral(" -> ") + link.captured(0)));
+                    if (!link.captured(2).isEmpty()) {
+                        QVERIFY2(anchors.value(link.captured(1)).contains(link.captured(2)), qPrintable(p.slug + QStringLiteral(" -> ") + link.captured(0)));
+                    }
+                }
+            }
+        }
+    }
+
+    void bareUrlsInTextAreNotEscaped()
+    {
+        const QByteArray xml = QByteArrayLiteral(
+            "<db:article xmlns:db=\"http://docbook.org/ns/docbook\" version=\"5.2\">"
+            "<db:info><db:title>Urls Class</db:title></db:info>"
+            "<db:para>See https://bugs.kde.org/show_bug.cgi?id=378523 for my_value.</db:para>"
+            "</db:article>");
+        QString error;
+        const auto page = converter().convert(QStringLiteral("urls"), xml, &error);
+        QVERIFY2(page, qPrintable(error));
+        // The URL is kept whole for the site's autolinking; text around it is still escaped.
+        QVERIFY(page->markdown.contains(QLatin1String("https://bugs.kde.org/show_bug.cgi?id=378523 for my\\_value.")));
+    }
+
+    void contentAfterThePageEndStaysOnThePage()
+    {
+        // Shaped like QDoc's KTextEditor CodeCompletionModel page: a section after </db:article>,
+        // under its own namespace prefix.
+        const QByteArray xml = QByteArrayLiteral(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            "<db:article xmlns:db=\"http://docbook.org/ns/docbook\" version=\"5.2\">\n"
+            "<db:info><db:title>Stray Class</db:title></db:info>\n"
+            "<db:para>Before the end.</db:para>\n"
+            "</db:article>\n"
+            "<n1:section xmlns:n1=\"http://docbook.org/ns/docbook\" xml:id=\"Mode-enum\">\n"
+            "<n1:title>enum Stray::Mode</n1:title>\n"
+            "<n1:para>After the end.</n1:para>\n"
+            "</n1:section>\n");
+        QString error;
+        const auto page = converter().convert(QStringLiteral("stray"), xml, &error);
+        QVERIFY2(page, qPrintable(error));
+        QVERIFY(page->markdown.indexOf(QLatin1String("Before the end.")) < page->markdown.indexOf(QLatin1String("After the end.")));
+        QVERIFY(page->markdown.contains(QLatin1String("enum Stray::Mode {#Mode-enum}")));
     }
 };
 

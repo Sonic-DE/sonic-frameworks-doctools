@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QDOCINDEX>
+<!-- SPDX-FileCopyrightText: 2026 Joseph Crowell <joseph.w.crowell@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Test fixture shaped like the .index file of QDoc's prepare step. -->
+<INDEX url="https://doc.qt.io/qt" title="Test module" version="" project="TestModule" indexTitle="Test Module">
+    <namespace name="" status="active" access="public" module="testmodule">
+        <class name="TestBase" fullname="TestBase" href="testbase.html" status="active" access="public" location="testbase.h" documented="true" module="TestModule" brief="The base of every watcher">
+            <function name="entries" fullname="TestBase::entries" href="testbase.html#entries" status="active" access="public" location="testbase.h" documented="true" meta="plain" type="QMap&lt;QString, QVariant&gt;" signature="QMap&lt;QString, QVariant&gt; entries(const QStringList &amp;keys, const QSize &amp;size) const"/>
+        </class>
+        <namespace name="Outer" fullname="Outer" href="outer-sub-testmodule.html" status="active" access="public" location="testns.h" documented="false" module="TestModule">
+            <namespace name="TestNs" fullname="Outer::TestNs" href="outer-testns.html" status="active" access="public" location="testns.h" documented="true" module="TestModule" brief="Helpers for the watchers">
+                <struct name="Settings" fullname="Outer::TestNs::Settings" href="outer-testns-settings.html" status="active" access="public" location="testns.h" documented="true" module="TestModule" brief="What a watcher starts with">
+                    <variable name="interval" fullname="Outer::TestNs::Settings::interval" href="outer-testns-settings.html#interval-var" status="active" access="public" location="testns.h" documented="true" type="int" static="false"/>
+                </struct>
+            </namespace>
+        </namespace>
+    </namespace>
+</INDEX>

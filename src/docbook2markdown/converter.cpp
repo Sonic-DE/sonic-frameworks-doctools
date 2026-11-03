@@ -77,6 +77,19 @@ namespace {
         }
     };
 
+    /*!
+     * QDoc (6.11.3) sometimes writes part of a page after the page's end tag, e.g. KTextEditor's
+     * CodeCompletionModel ends with "</db:article>" followed by its HighlightMethod enum section. That
+     * isn't well-formed XML; moving the end tag behind the stray content keeps that content on its page.
+     */
+    QByteArray withStrayContentInside(const QByteArray& xml, bool* moved)
+    {
+        static const QByteArray endTag = QByteArrayLiteral("</db:article>");
+        const qsizetype end = xml.indexOf(endTag);
+        *moved = end >= 0 && !xml.mid(end + endTag.size()).trimmed().isEmpty();
+        return *moved ? xml.left(end) + xml.mid(end + endTag.size()) + endTag : xml;
+    }
+
     std::unique_ptr<Element> parse(const QByteArray& xml, QString* error)
     {
         QXmlStreamReader reader(xml);
@@ -119,12 +132,22 @@ namespace {
         return root;
     }
 
-    //! Escapes Markdown punctuation in plain text.
+    //! Escapes Markdown punctuation in plain text. Bare URLs stay as they are: the docs site turns
+    //! them into links, and an escape (e.g. "show\_bug.cgi") would end the link early.
     QString escape(const QString& text)
     {
         static const QRegularExpression special(QStringLiteral(R"(([\\`*_\[\]<>|#]))"));
-        QString result = text;
-        return result.replace(special, QStringLiteral(R"(\\1)"));
+        static const QRegularExpression url(QStringLiteral(R"(\b(?:https?|ftp)://[^\s<>"'`]+)"));
+        QString result;
+        qsizetype done = 0;
+        auto urls = url.globalMatch(text);
+        while (urls.hasNext()) {
+            const QRegularExpressionMatch match = urls.next();
+            result += text.mid(done, match.capturedStart() - done).replace(special, QStringLiteral(R"(\\1)"));
+            result += match.captured();
+            done = match.capturedEnd();
+        }
+        return result + text.mid(done).replace(special, QStringLiteral(R"(\\1)"));
     }
 
     QString yamlString(const QString& text)
@@ -255,6 +278,46 @@ namespace {
         return Member{name, signature, anchor};
     }
 
+    //! The members a documentation section (e.g. "member-function-documentation") documents, by anchor and
+    //! heading: each member section's title, and the anchored bridgeheads of members documented together
+    //! with it (several \fn in one comment).
+    QList<std::pair<QString, const Element*>> memberHeadings(const Element& documentation)
+    {
+        QList<std::pair<QString, const Element*>> result;
+        for (const Element* member : documentation.childElements(QStringLiteral("section"))) {
+            result.append({member->attribute(QStringLiteral("id")), member->child(QStringLiteral("title"))});
+            for (const Element* bridgehead : member->childElements(QStringLiteral("bridgehead"))) {
+                const QString id = bridgehead->attribute(QStringLiteral("id"));
+                if (!id.isEmpty()) {
+                    result.append({id, bridgehead});
+                }
+            }
+        }
+        return result;
+    }
+
+    //! A member variable's entry as Qt's members lists show it, "binaryName : QString" for the title
+    //! "QString Options::binaryName".
+    Member variableEntry(const Element& title, const QString& anchor)
+    {
+        QString text = title.text();
+        text.remove(leadingTags());
+        text = text.trimmed();
+        const qsizetype at = text.lastIndexOf(QLatin1String("::"));
+        const qsizetype nameStart = at < 0 ? text.lastIndexOf(QLatin1Char(' ')) + 1 : at + 2;
+        const QString name = text.mid(nameStart);
+        qsizetype qualifierStart = at < 0 ? nameStart : at;
+        while (qualifierStart > 0) {
+            const QChar c = text.at(qualifierStart - 1);
+            if (!c.isLetterOrNumber() && c != QLatin1Char('_') && c != QLatin1Char(':') && c != QLatin1Char('<') && c != QLatin1Char('>')) {
+                break;
+            }
+            --qualifierStart;
+        }
+        const QString type = text.left(qualifierStart).trimmed();
+        return Member{name, type.isEmpty() ? name : name + QStringLiteral(" : ") + type, anchor};
+    }
+
     //! Adds the base classes from the requirements' "Inherits" row: SonicDE ones by page path, Qt ones
     //! with the URL of Qt's all-members page.
     void addBaseClasses(const Element& requirements, const Options& options, ClassInfo* info)
@@ -289,10 +352,10 @@ namespace {
 
     class PageWriter {
     public:
-        explicit PageWriter(const Converter& converter, QString slug = QString(), QSet<QString> obsoleteIds = {})
+        explicit PageWriter(const Converter& converter, QString slug = QString(), PageAnchors anchors = {})
             : m_converter(converter)
             , m_slug(std::move(slug))
-            , m_obsoleteIds(std::move(obsoleteIds))
+            , m_anchors(std::move(anchors))
         {
         }
 
@@ -335,9 +398,9 @@ namespace {
         QString table(const Element& element) const;
 
         const Converter& m_converter;
-        //! The page being written, and the anchors of its members that moved to its obsolete page.
+        //! The page being written and its anchors (including those that moved to its obsolete page).
         QString m_slug;
-        QSet<QString> m_obsoleteIds;
+        PageAnchors m_anchors;
     };
 
     QString PageWriter::inlineElement(const Element& element) const
@@ -354,11 +417,8 @@ namespace {
             if (text.isEmpty()) {
                 text = escape(href);
             }
-            const QString ownPage = m_slug + QStringLiteral(".xml#");
-            if (!m_obsoleteIds.isEmpty() && href.startsWith(ownPage) && m_obsoleteIds.contains(href.mid(ownPage.size()))) {
-                return QStringLiteral("[%1](%2-obsolete.md#%3)").arg(text, m_slug, href.mid(ownPage.size()));
-            }
-            return QStringLiteral("[%1](%2)").arg(text, m_converter.linkTarget(href));
+            const QString target = m_converter.resolveLink(m_slug, m_anchors, href);
+            return target.isEmpty() ? text : QStringLiteral("[%1](%2)").arg(text, target);
         }
 
         if (name == QLatin1String("emphasis")) {
@@ -475,7 +535,16 @@ namespace {
         if (name == QLatin1String("bridgehead")) {
             // QDoc's second heading line, e.g. "flags KConfig::OpenFlags" under "enum KConfig::OpenFlag".
             const QString text = inlineContent(element).trimmed();
-            return text.isEmpty() ? QStringList() : QStringList{QStringLiteral("**") + text + QStringLiteral("**")};
+            if (text.isEmpty()) {
+                return {};
+            }
+            // With an id it is another member documented together with the section's (several \fn):
+            // a heading like the section's own, so links to it land.
+            const QString id = element.attribute(QStringLiteral("id"));
+            if (!id.isEmpty()) {
+                return {QStringLiteral("%1 %2 {#%3}").arg(QString(std::clamp(level - 1, 1, 6), QLatin1Char('#')), text, id)};
+            }
+            return {QStringLiteral("**") + text + QStringLiteral("**")};
         }
 
         if (isInline(name)) {
@@ -533,7 +602,25 @@ namespace {
         if (!id.isEmpty()) {
             heading += QStringLiteral(" {#%1}").arg(id);
         }
-        return QStringList{heading} + blocks(element, level + 1);
+        if (id != QLatin1String("classes")) {
+            return QStringList{heading} + blocks(element, level + 1);
+        }
+
+        // QDoc lists structs and unions by their bare name, without a link: link them like its classes.
+        QStringList result{heading};
+        for (const Element* child : element.childElements()) {
+            const Element* entryTitle = child->name == QLatin1String("section") ? child->child(QStringLiteral("title")) : nullptr;
+            const auto aggregate = entryTitle && entryTitle->childElements().isEmpty() ? m_converter.aggregatePage(entryTitle->text().trimmed()) : std::nullopt;
+            if (!aggregate) {
+                result += block(*child, level + 1);
+                continue;
+            }
+            const auto& [page, entry] = *aggregate;
+            result.append(QStringLiteral("%1 %2 [%3](%4.md)")
+                    .arg(QString(std::min(level + 1, 6), QLatin1Char('#')), entry.typeWord.toLower(), escape(entryTitle->text().trimmed()), page));
+            result += blocks(*child, level + 2);
+        }
+        return result;
     }
 
     QString PageWriter::table(const Element& element) const
@@ -615,9 +702,7 @@ namespace {
                 const bool isFunctions = id == prefix + QStringLiteral("member-function-documentation");
 
                 if (isTypes || isProperties || isFunctions) {
-                    for (const Element* member : sectionElement->childElements(QStringLiteral("section"))) {
-                        const QString memberId = member->attribute(QStringLiteral("id"));
-                        const Element* titleElement = member->child(QStringLiteral("title"));
+                    for (const auto& [memberId, titleElement] : memberHeadings(*sectionElement)) {
                         const QString title = titleElement ? titleElement->text().trimmed() : QString();
                         const QString entry = QStringLiteral("- [%2](#%1)").arg(memberId);
 
@@ -767,9 +852,142 @@ QString Converter::linkTarget(const QString& href) const
     return target.isEmpty() ? QStringLiteral("#") : target;
 }
 
+namespace {
+
+    PageAnchors collectAnchors(const Element& root)
+    {
+        PageAnchors result;
+        std::function<void(const Element&, bool)> visit = [&](const Element& element, bool inObsolete) {
+            const QString id = element.attribute(QStringLiteral("id"));
+            const bool obsolete = inObsolete || (element.name == QLatin1String("section") && id == QLatin1String("obsolete"));
+            if (!id.isEmpty()) {
+                result.anchors.insert(id);
+                if (inObsolete) {
+                    result.obsolete.insert(id);
+                }
+            }
+            for (const Element* child : element.childElements()) {
+                visit(*child, obsolete);
+            }
+        };
+        visit(root, false);
+        return result;
+    }
+
+}
+
+std::optional<PageAnchors> Converter::pageAnchors(const QByteArray& xml, QString* error)
+{
+    bool moved = false;
+    const std::unique_ptr<Element> root = parse(withStrayContentInside(xml, &moved), error);
+    if (!root) {
+        return std::nullopt;
+    }
+    return collectAnchors(*root);
+}
+
+void Converter::setModuleAnchors(QHash<QString, PageAnchors> anchors)
+{
+    m_moduleAnchors = std::move(anchors);
+}
+
+std::optional<QHash<QString, IndexAggregate>> Converter::indexAggregates(const QByteArray& xml, QString* error)
+{
+    QHash<QString, IndexAggregate> result;
+    QXmlStreamReader reader(xml);
+    while (!reader.atEnd()) {
+        if (reader.readNext() != QXmlStreamReader::StartElement) {
+            continue;
+        }
+        const QStringView name = reader.name();
+        if (name != QLatin1String("struct") && name != QLatin1String("union")) {
+            continue;
+        }
+        const QXmlStreamAttributes attributes = reader.attributes();
+        const QString href = attributes.value(QLatin1String("href")).toString();
+        if (href.endsWith(QLatin1String(".html")) && !href.contains(QLatin1Char('#'))) {
+            result.insert(href.chopped(5),
+                IndexAggregate{attributes.value(QLatin1String("fullname")).toString(),
+                    name == QLatin1String("struct") ? QStringLiteral("Struct") : QStringLiteral("Union")});
+        }
+    }
+    if (reader.hasError()) {
+        *error = QStringLiteral("%1 (line %2)").arg(reader.errorString()).arg(reader.lineNumber());
+        return std::nullopt;
+    }
+    return result;
+}
+
+void Converter::setIndexAggregates(QHash<QString, IndexAggregate> aggregates)
+{
+    m_aggregates = std::move(aggregates);
+}
+
+std::optional<std::pair<QString, IndexAggregate>> Converter::aggregatePage(const QString& title) const
+{
+    std::optional<std::pair<QString, IndexAggregate>> found;
+    for (auto it = m_aggregates.cbegin(); it != m_aggregates.cend(); ++it) {
+        if (it->fullName == title || it->fullName.endsWith(QStringLiteral("::") + title)) {
+            if (found) {
+                sonicDebug() << "The class list entry" << title << "names more than one struct or union";
+                return std::nullopt;
+            }
+            found = std::pair{it.key(), it.value()};
+        }
+    }
+    return found;
+}
+
+QString Converter::resolveLink(const QString& fromSlug, const PageAnchors& own, const QString& href) const
+{
+    static const QRegularExpression otherDocument(QStringLiteral(R"(^([a-z]+://|\.\./))"));
+    if (otherDocument.match(href).hasMatch()) {
+        return linkTarget(href);
+    }
+
+    const qsizetype hash = href.indexOf(QLatin1Char('#'));
+    const QString file = hash < 0 ? href : href.left(hash);
+    const QString anchor = hash < 0 ? QString() : href.mid(hash + 1);
+    if (file.isEmpty()) {
+        return linkTarget(href);
+    }
+    if (!file.endsWith(QLatin1String(".xml"))) {
+        // Files QDoc's DocBook output has no page for, e.g. an example's sources ("Tutorial/main.cpp").
+        return file.startsWith(QLatin1String("images/")) ? linkTarget(href) : QString();
+    }
+
+    const QString slug = file.chopped(4);
+    const PageAnchors* target = slug == fromSlug ? &own : nullptr;
+    if (!target && !m_moduleAnchors.isEmpty()) {
+        const auto it = m_moduleAnchors.constFind(slug);
+        if (it == m_moduleAnchors.cend()) {
+            sonicDebug() << "Link from" << fromSlug << "to" << slug << "which QDoc wrote no page for; kept as text";
+            return QString();
+        }
+        target = &*it;
+    }
+    if (!target || anchor.isEmpty()) {
+        return linkTarget(href);
+    }
+    if (target->obsolete.contains(anchor)) {
+        return QStringLiteral("%1-obsolete.md#%2").arg(slug, anchor);
+    }
+    if (!target->anchors.contains(anchor)) {
+        // QDoc links to members it has no documentation for (e.g. undocumented properties): link to the
+        // page instead, or keep only the text on the page itself.
+        sonicDebug() << "Link from" << fromSlug << "to the missing anchor" << slug << "#" << anchor;
+        return slug == fromSlug ? QString() : slug + QStringLiteral(".md");
+    }
+    return linkTarget(href);
+}
+
 std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xml, QString* error) const
 {
-    const std::unique_ptr<Element> root = parse(xml, error);
+    bool moved = false;
+    const std::unique_ptr<Element> root = parse(withStrayContentInside(xml, &moved), error);
+    if (moved) {
+        sonicWarning() << "Page" << slug << "has content after its end tag (a QDoc defect); it was kept at the end of the page";
+    }
     if (!root) {
         return std::nullopt;
     }
@@ -780,9 +998,17 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
         *error = QStringLiteral("the page has no info/title");
         return std::nullopt;
     }
-    const QString title = titleElement->text().trimmed();
-    const bool isClass = title.endsWith(QLatin1String(" Class"));
-    const QString className = isClass ? title.chopped(6) : QString();
+    QString title = titleElement->text().trimmed();
+    if (title.isEmpty() && m_aggregates.contains(slug)) {
+        // QDoc's DocBook writer titles only classes; Qt's HTML pages call these "<name> Struct" or "<name> Union".
+        const IndexAggregate& aggregate = m_aggregates[slug];
+        title = aggregate.fullName + QLatin1Char(' ') + aggregate.typeWord;
+    }
+    static const QRegularExpression classTitle(QStringLiteral(R"( (Class|Struct|Union)$)"));
+    const QRegularExpressionMatch classMatch = classTitle.match(title);
+    const bool isClass = classMatch.hasMatch();
+    const QString className = isClass ? title.left(classMatch.capturedStart()) : QString();
+    const bool isNamespace = title.endsWith(QLatin1String(" Namespace"));
 
     // Deprecated members (QDoc's "obsolete" section) go to their own page, and links to them follow.
     const Element* obsolete = nullptr;
@@ -795,19 +1021,7 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
             hasDetails = true;
         }
     }
-    QSet<QString> obsoleteIds;
-    if (obsolete) {
-        std::function<void(const Element&)> collect = [&](const Element& element) {
-            for (const Element* child : element.childElements(QStringLiteral("section"))) {
-                if (!child->attribute(QStringLiteral("id")).isEmpty()) {
-                    obsoleteIds.insert(child->attribute(QStringLiteral("id")));
-                }
-                collect(*child);
-            }
-        };
-        collect(*obsolete);
-    }
-    const PageWriter writer(*this, slug, obsoleteIds);
+    const PageWriter writer(*this, slug, collectAnchors(*root));
 
     const Element* abstract = info->child(QStringLiteral("abstract"));
     const QString brief = abstract ? writer.blocks(*abstract, 2).join(QLatin1Char(' ')).trimmed() : QString();
@@ -843,6 +1057,11 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
             addBaseClasses(*child, m_options, &*page.classInfo);
             continue;
         }
+        if (isNamespace && !requirementsDone && body.isEmpty() && child->name == QLatin1String("variablelist")) {
+            requirementsDone = true;
+            body.append(writer.requirements(*child));
+            continue;
+        }
         body += writer.block(*child, 2);
     }
 
@@ -854,13 +1073,13 @@ std::optional<Page> Converter::convert(const QString& slug, const QByteArray& xm
     if (page.classInfo) {
         for (const Element* sectionElement : root->childElements(QStringLiteral("section"))) {
             const QString id = sectionElement->attribute(QStringLiteral("id"));
-            if (id != QLatin1String("member-function-documentation") && id != QLatin1String("property-documentation")) {
+            const bool variables = id == QLatin1String("member-variable-documentation");
+            if (!variables && id != QLatin1String("member-function-documentation") && id != QLatin1String("property-documentation")) {
                 continue;
             }
-            for (const Element* member : sectionElement->childElements(QStringLiteral("section"))) {
-                const Element* memberTitle = member->child(QStringLiteral("title"));
+            for (const auto& [anchor, memberTitle] : memberHeadings(*sectionElement)) {
                 if (memberTitle) {
-                    page.classInfo->members.append(memberEntry(*memberTitle, member->attribute(QStringLiteral("id"))));
+                    page.classInfo->members.append(variables ? variableEntry(*memberTitle, anchor) : memberEntry(*memberTitle, anchor));
                 }
             }
         }
