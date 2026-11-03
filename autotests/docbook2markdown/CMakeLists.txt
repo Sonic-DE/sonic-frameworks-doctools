@@ -25,7 +25,14 @@ add_test(NAME docbook2markdown6_output
         "${output}/index.md"
         "${output}/testmodule/module.json"
         "${output}/testmodule/testwatcher.md"
+        "${output}/testmodule/testwatcher-obsolete.md"
         "${output}/othermodule/testmodule-module.md"
+)
+# The all-members page is written by the program (from module.json) and lists inherited members.
+add_test(NAME docbook2markdown6_members_page COMMAND ${CMAKE_COMMAND} -E cat "${output}/testmodule/testwatcher-members.md")
+set_tests_properties(docbook2markdown6_members_page PROPERTIES
+    DEPENDS docbook2markdown6_run_second_module
+    PASS_REGULAR_EXPRESSION "\\(testbase\\.md#entries\\)"
 )
 set_tests_properties(docbook2markdown6_run PROPERTIES DEPENDS docbook2markdown6_clean)
 set_tests_properties(docbook2markdown6_run_second_module PROPERTIES DEPENDS docbook2markdown6_run)

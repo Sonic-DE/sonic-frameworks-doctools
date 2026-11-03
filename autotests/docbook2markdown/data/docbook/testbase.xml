@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Joseph Crowell <joseph.w.crowell@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Test fixture shaped like QDoc's DocBook output for a base class with a Qt base class. -->
+<db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
+<db:info>
+<db:title>TestBase Class</db:title>
+<db:productname>Qt</db:productname>
+<db:edition>Qt 6.31.0 Reference Documentation</db:edition>
+<db:titleabbrev>Test module</db:titleabbrev>
+<db:abstract>
+<db:para>The base of every watcher.</db:para>
+</db:abstract>
+</db:info>
+<db:variablelist>
+<db:varlistentry>
+<db:term>Header</db:term>
+<db:listitem>
+<db:para>TestBase</db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>Inherits</db:term>
+<db:listitem>
+<db:para><db:link xlink:href="../qtcore/qobject.html" xlink:role="class">QObject</db:link></db:para>
+</db:listitem>
+</db:varlistentry>
+<db:varlistentry>
+<db:term>Inherited By</db:term>
+<db:listitem>
+<db:para><db:link xlink:href="testwatcher.xml" xlink:role="class">TestWatcher</db:link></db:para>
+</db:listitem>
+</db:varlistentry>
+</db:variablelist>
+<db:section xml:id="member-function-documentation">
+<db:title>Member Function Documentation</db:title>
+<db:section xml:id="dtor.TestBase">
+<db:title>[virtual noexcept] TestBase::~TestBase()</db:title>
+<db:para>Destroys the base.</db:para>
+</db:section>
+<db:section xml:id="entries">
+<db:title>QMap&lt;QString, QVariant&gt; TestBase::entries(const QStringList &amp;<db:emphasis>keys</db:emphasis>, const QSize &amp;<db:emphasis>size</db:emphasis> = QSize(1, 2)) const</db:title>
+<db:para>Returns the entries for <db:code role="parameter">keys</db:code>.</db:para>
+</db:section>
+<db:section xml:id="operator-eq-eq">
+<db:title>bool TestBase::operator==(const TestBase &amp;<db:emphasis>other</db:emphasis>) const</db:title>
+<db:para>Compares two bases.</db:para>
+</db:section>
+</db:section>
+</db:article>

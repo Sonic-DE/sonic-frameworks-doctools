@@ -29,7 +29,7 @@
 <db:varlistentry>
 <db:term>Inherits</db:term>
 <db:listitem>
-<db:para><db:link xlink:href="../qtcore/qobject.html" xlink:role="class">QObject</db:link></db:para>
+<db:para><db:link xlink:href="testbase.xml" xlink:role="class">TestBase</db:link></db:para>
 </db:listitem>
 </db:varlistentry>
 <db:varlistentry>
@@ -43,6 +43,7 @@
 <db:title>Detailed Description</db:title>
 <db:para>The <db:link xlink:href="testwatcher.xml#changed">changed</db:link>() signal is emitted for <db:link xlink:href="../otherframework/othergroup.html#name">OtherGroup::name</db:link>, a <db:emphasis>very </db:emphasis>important event.</db:para>
 <db:programlisting language="cpp">auto watcher = TestWatcher::create(config);</db:programlisting>
+<db:para>Older code calls <db:link xlink:href="testwatcher.xml#reset">reset</db:link>() instead.</db:para>
 <db:note>
 <db:para>Set config sources first.</db:para>
 </db:note>
@@ -92,7 +93,7 @@
 <db:section xml:id="member-function-documentation">
 <db:title>Member Function Documentation</db:title>
 <db:section xml:id="TestWatcher">
-<db:title>[explicit, since 6.23] TestWatcher::TestWatcher(const TestConfig &amp;config)</db:title>
+<db:title>[explicit, since 6.23] TestWatcher::TestWatcher(const TestConfig &amp;<db:emphasis>config</db:emphasis>)</db:title>
 <db:para>Constructs a watcher.</db:para>
 </db:section>
 <db:section xml:id="config">
@@ -100,7 +101,7 @@
 <db:para>Returns the config.</db:para>
 </db:section>
 <db:section xml:id="changed">
-<db:title>[signal] void TestWatcher::changed(const QByteArrayList &amp;names)</db:title>
+<db:title>[signal] void TestWatcher::changed(const QByteArrayList &amp;<db:emphasis>names</db:emphasis>)</db:title>
 <db:para>Emitted when <db:code>names</db:code> change.</db:para>
 </db:section>
 <db:section xml:id="reload">
@@ -108,8 +109,20 @@
 <db:para>Reloads the config. This function is <db:link xlink:href="">Q_INVOKABLE</db:link>.</db:para>
 </db:section>
 <db:section xml:id="create">
-<db:title>[static] TestWatcher *TestWatcher::create(const TestConfig &amp;config)</db:title>
+<db:title>[static] TestWatcher *TestWatcher::create(const TestConfig &amp;<db:emphasis>config</db:emphasis>)</db:title>
 <db:para>Creates a watcher.</db:para>
+</db:section>
+</db:section>
+<db:section xml:id="obsolete">
+<db:title>Obsolete Members for TestWatcher</db:title>
+<db:para><db:emphasis role="bold">The following members of class <db:link xlink:href="testwatcher.xml">TestWatcher</db:link> are deprecated.</db:emphasis> We strongly advise against using them in new code.</db:para>
+<db:section xml:id="obsolete-member-function-documentation">
+<db:title>Obsolete Member Function Documentation</db:title>
+<db:section xml:id="reset">
+<db:title>[deprecated in 6.3] void TestWatcher::reset(int <db:emphasis>count</db:emphasis> = 1)</db:title>
+<db:para>This function is deprecated since 6.3. We strongly advise against using it in new code.</db:para>
+<db:para>Resets the watcher. Use <db:link xlink:href="testwatcher.xml#reload">reload</db:link>() instead.</db:para>
+</db:section>
 </db:section>
 </db:section>
 </db:article>

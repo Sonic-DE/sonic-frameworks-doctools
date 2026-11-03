@@ -26,9 +26,12 @@ publishes the SonicDE API reference on sonicde.org. Class pages keep the Qt refe
    ```
 
    Each run writes `<output dir>/<module>/<page>.md` for every page, copies `images/`, and records
-   the module in `<output dir>/<module>/module.json`. It then rewrites `<output dir>/toc.yaml` (one
-   section per module) and `<output dir>/index.md` (the reference's front page, listing every
-   module) from all modules converted there. Links between modules become relative links, and
+   the module in `<output dir>/<module>/module.json`. A class's deprecated members go to their own
+   page, `<page>-obsolete.md`, as on Qt's site. The run then rewrites, from all modules converted
+   there, `<output dir>/toc.yaml` (one section for each module's C++ classes and one for its QML
+   types), `<output dir>/index.md` (the reference's front page, listing every C++ and QML module)
+   and every class's `<page>-members.md` (all members, including those inherited from SonicDE
+   classes in other modules, so the order of the runs doesn't matter). Links between modules become relative links, and
    links into Qt's documentation become `https://doc.qt.io/qt-6/` links (`--qt-docs-dir` and
    `--qt-docs-url` change where Qt's docs are found and linked).
 
