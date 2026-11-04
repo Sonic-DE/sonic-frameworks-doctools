@@ -905,10 +905,12 @@ std::optional<QHash<QString, IndexAggregate>> Converter::indexAggregates(const Q
         }
         const QXmlStreamAttributes attributes = reader.attributes();
         const QString href = attributes.value(QLatin1String("href")).toString();
-        if (href.endsWith(QLatin1String(".html")) && !href.contains(QLatin1Char('#'))) {
+        // QDoc leaves out fullname when it equals name (global scope).
+        const QString fullName = attributes.hasAttribute(QLatin1String("fullname")) ? attributes.value(QLatin1String("fullname")).toString()
+                                                                                    : attributes.value(QLatin1String("name")).toString();
+        if (href.endsWith(QLatin1String(".html")) && !href.contains(QLatin1Char('#')) && !fullName.isEmpty()) {
             result.insert(href.chopped(5),
-                IndexAggregate{attributes.value(QLatin1String("fullname")).toString(),
-                    name == QLatin1String("struct") ? QStringLiteral("Struct") : QStringLiteral("Union")});
+                IndexAggregate{fullName, name == QLatin1String("struct") ? QStringLiteral("Struct") : QStringLiteral("Union")});
         }
     }
     if (reader.hasError()) {
