@@ -75,6 +75,16 @@ struct IndexAggregate {
     QString typeWord;
 };
 
+//! A current class, struct or union from QDoc's index of the module.
+struct IndexClass {
+    //! E.g. "KPluginFactory::Result".
+    QString fullName;
+    //! Its page without ".html", e.g. "kpluginfactory-result".
+    QString page;
+    //! Its \brief, possibly empty.
+    QString brief;
+};
+
 //! One section of the reference's contents: a C++ module's classes or a QML module's types.
 struct TocSection {
     //! The module page's title and description, e.g. "KConfigCore C++ Classes".
@@ -166,10 +176,22 @@ public:
     //! The page and entry of the struct or union a class list names \a title (its full or a qualified name).
     std::optional<std::pair<QString, IndexAggregate>> aggregatePage(const QString& title) const;
 
+    //! Reads the documented, not deprecated or internal classes, structs and unions from a QDoc .index file,
+    //! by the page of their module (e.g. "kcoreaddons-module"); returns nothing and sets \a error when the
+    //! XML can't be read.
+    static std::optional<QHash<QString, QList<IndexClass>>> indexModuleClasses(const QByteArray& xml, QString* error);
+
+    //! With them, a module page's class list also names the module's classes that QDoc's list leaves out.
+    void setIndexModuleClasses(QHash<QString, QList<IndexClass>> classes);
+
+    //! The classes the index puts in the module whose page is \a moduleSlug.
+    QList<IndexClass> moduleClasses(const QString& moduleSlug) const;
+
 private:
     Options m_options;
     QHash<QString, PageAnchors> m_moduleAnchors;
     QHash<QString, IndexAggregate> m_aggregates;
+    QHash<QString, QList<IndexClass>> m_moduleClasses;
 };
 
 }

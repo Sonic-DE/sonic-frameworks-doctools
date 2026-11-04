@@ -27,7 +27,9 @@ publishes the SonicDE API reference on sonicde.org. Class pages keep the Qt refe
 
    `--index` takes the module's `.index` file from the prepare step. QDoc's DocBook writer leaves
    the pages of structs and unions untitled; the index gives their names, so they get Qt's
-   titles ("Foo::Bar Struct") and are linked from their namespace's or class's list.
+   titles ("Foo::Bar Struct") and are linked from their namespace's or class's list. QDoc's
+   module page also leaves some classes out of its list (e.g. one named like another class's
+   nested class); the index adds every current class of the module to it.
 
    Each run writes `<output dir>/<module>/<page>.md` for every page, copies `images/`, and records
    the module in `<output dir>/<module>/module.json`. A class's deprecated members go to their own

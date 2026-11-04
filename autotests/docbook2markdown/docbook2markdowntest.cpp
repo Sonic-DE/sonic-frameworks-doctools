@@ -28,19 +28,35 @@ private:
         return Converter(options);
     }
 
-    //! The structs and unions of the fixture module's QDoc index.
-    static QHash<QString, IndexAggregate> indexAggregates()
+    static QByteArray indexXml()
     {
         QFile file(QStringLiteral(DATA_DIR "/index/testmodule.index"));
         if (!file.open(QIODevice::ReadOnly)) {
             qFatal("can't read fixture %s", qPrintable(file.fileName()));
         }
+        return file.readAll();
+    }
+
+    //! The structs and unions of the fixture module's QDoc index.
+    static QHash<QString, IndexAggregate> indexAggregates()
+    {
         QString error;
-        const auto aggregates = Converter::indexAggregates(file.readAll(), &error);
+        const auto aggregates = Converter::indexAggregates(indexXml(), &error);
         if (!aggregates) {
-            qFatal("fixture %s didn't parse: %s", qPrintable(file.fileName()), qPrintable(error));
+            qFatal("fixture index didn't parse: %s", qPrintable(error));
         }
         return *aggregates;
+    }
+
+    //! The classes of the fixture module's QDoc index, by module page.
+    static QHash<QString, QList<IndexClass>> indexModuleClasses()
+    {
+        QString error;
+        const auto classes = Converter::indexModuleClasses(indexXml(), &error);
+        if (!classes) {
+            qFatal("fixture index didn't parse: %s", qPrintable(error));
+        }
+        return *classes;
     }
 
     //! The fixture pages, converted as the program does: knowing every page's anchors and the index's structs.
@@ -65,6 +81,7 @@ private:
         Converter moduleConverter = converter();
         moduleConverter.setModuleAnchors(anchors);
         moduleConverter.setIndexAggregates(indexAggregates());
+        moduleConverter.setIndexModuleClasses(indexModuleClasses());
 
         QList<Page> pages;
         for (const QString& name : dir.entryList({QStringLiteral("*.xml")}, QDir::Files, QDir::Name)) {
@@ -380,6 +397,37 @@ private Q_SLOTS:
         const QString markdown = page(QStringLiteral("outer-testns")).markdown;
         QVERIFY(markdown.contains(QLatin1String("### class [TestBase](testbase.md)")));
         QVERIFY(markdown.contains(QLatin1String("### struct [TestNs::Settings](outer-testns-settings.md)\n\nWhat a watcher starts with.")));
+    }
+
+    void modulePagesListEveryCurrentClassOfTheIndex()
+    {
+        // Only current, documented classes with a page of their own, under their module's page.
+        const QHash<QString, QList<IndexClass>> classes = indexModuleClasses();
+        QCOMPARE(classes.keys(), QStringList{QStringLiteral("testmodule-module")});
+        QStringList pages;
+        for (const IndexClass& entry : classes.value(QStringLiteral("testmodule-module"))) {
+            pages.append(entry.page);
+        }
+        pages.sort();
+        QCOMPARE(pages, (QStringList{QStringLiteral("outer-testns-settings"), QStringLiteral("testbase"), QStringLiteral("testpoint"), QStringLiteral("testwatcher")}));
+
+        // QDoc's list names only TestWatcher; the others join it once each, in alphabetical order, with their brief.
+        const QString markdown = page(QStringLiteral("testmodule-module")).markdown;
+        const qsizetype start = markdown.indexOf(QLatin1String("- ["));
+        QVERIFY(start >= 0);
+        const QStringList lines = markdown.mid(start).split(QLatin1Char('\n')).mid(0, 4);
+        QCOMPARE(lines,
+            (QStringList{
+                QStringLiteral("- [Outer::TestNs::Settings](outer-testns-settings.md): What a watcher starts with."),
+                QStringLiteral("- [TestBase](testbase.md): The base of every watcher."),
+                QStringLiteral("- [TestPoint](testpoint.md): A point."),
+                QStringLiteral("- [TestWatcher](testwatcher.md): Watches a TestConfig for changes."),
+            }));
+        QCOMPARE(markdown.count(QLatin1String("(testwatcher.md)")), 1);
+        QVERIFY(!markdown.contains(QLatin1String("testold")));
+        QVERIFY(!markdown.contains(QLatin1String("testhidden")));
+        // Other class lists (a namespace's) don't get the module's classes.
+        QVERIFY(!page(QStringLiteral("outer-testns")).markdown.contains(QLatin1String("(testwatcher.md)")));
     }
 
     void seeAlsoIsAParagraphAndEmphasisHasNoInnerEdgeSpaces()

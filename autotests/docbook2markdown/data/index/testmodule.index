@@ -5,6 +5,10 @@
 <!-- Test fixture shaped like the .index file of QDoc's prepare step. -->
 <INDEX url="https://doc.qt.io/qt" title="Test module" version="" project="TestModule" indexTitle="Test Module">
     <namespace name="" status="active" access="public" module="testmodule">
+        <module name="TestModule" href="testmodule-module.html" status="active" location="testmodule.qdoc" documented="true" seen="true" title="Test Module C++ Classes" brief="A module for the tests"/>
+        <class name="TestWatcher" href="testwatcher.html" status="active" access="public" location="testwatcher.h" documented="true" bases="TestBase" module="TestModule" brief="Watches a TestConfig for changes"/>
+        <class name="TestOld" href="testold.html" status="deprecated" access="public" location="testold.h" documented="true" module="TestModule" brief="Replaced by TestWatcher"/>
+        <class name="TestHidden" href="testhidden.html" status="internal" access="public" location="testhidden.h" documented="true" module="TestModule"/>
         <class name="TestBase" fullname="TestBase" href="testbase.html" status="active" access="public" location="testbase.h" documented="true" module="TestModule" brief="The base of every watcher">
             <function name="entries" fullname="TestBase::entries" href="testbase.html#entries" status="active" access="public" location="testbase.h" documented="true" meta="plain" type="QMap&lt;QString, QVariant&gt;" signature="QMap&lt;QString, QVariant&gt; entries(const QStringList &amp;keys, const QSize &amp;size) const"/>
         </class>
