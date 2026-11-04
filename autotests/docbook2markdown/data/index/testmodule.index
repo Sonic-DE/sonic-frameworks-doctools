@@ -8,6 +8,9 @@
         <class name="TestBase" fullname="TestBase" href="testbase.html" status="active" access="public" location="testbase.h" documented="true" module="TestModule" brief="The base of every watcher">
             <function name="entries" fullname="TestBase::entries" href="testbase.html#entries" status="active" access="public" location="testbase.h" documented="true" meta="plain" type="QMap&lt;QString, QVariant&gt;" signature="QMap&lt;QString, QVariant&gt; entries(const QStringList &amp;keys, const QSize &amp;size) const"/>
         </class>
+        <struct name="TestPoint" href="testpoint.html" status="active" access="public" location="testpoint.h" documented="true" module="TestModule" brief="A point">
+            <variable name="x" fullname="TestPoint::x" href="testpoint.html#x-var" status="active" access="public" location="testpoint.h" documented="true" type="int" static="false"/>
+        </struct>
         <namespace name="Outer" fullname="Outer" href="outer-sub-testmodule.html" status="active" access="public" location="testns.h" documented="false" module="TestModule">
             <namespace name="TestNs" fullname="Outer::TestNs" href="outer-testns.html" status="active" access="public" location="testns.h" documented="true" module="TestModule" brief="Helpers for the watchers">
                 <struct name="Settings" fullname="Outer::TestNs::Settings" href="outer-testns-settings.html" status="active" access="public" location="testns.h" documented="true" module="TestModule" brief="What a watcher starts with">

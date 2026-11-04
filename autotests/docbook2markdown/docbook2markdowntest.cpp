@@ -351,13 +351,18 @@ private Q_SLOTS:
     void structsGetTheirTitleAndLinksFromTheIndex()
     {
         const QHash<QString, IndexAggregate> aggregates = indexAggregates();
-        QCOMPARE(aggregates.size(), 1);
+        QCOMPARE(aggregates.size(), 2);
         QCOMPARE(aggregates.value(QStringLiteral("outer-testns-settings")).fullName, QStringLiteral("Outer::TestNs::Settings"));
+        // At global scope QDoc's index has no fullname.
+        QCOMPARE(aggregates.value(QStringLiteral("testpoint")).fullName, QStringLiteral("TestPoint"));
 
-        // Every page has a title, structs one like Qt's HTML pages, and they are laid out like classes.
+        // Every page has a title, every class page a name (module.json rejects one without), structs a
+        // title like Qt's HTML pages, and they are laid out like classes.
         for (const Page& p : allPages()) {
             QVERIFY2(!p.title.isEmpty(), qPrintable(p.slug));
+            QVERIFY2(!p.classInfo || !p.classInfo->name.isEmpty(), qPrintable(p.slug));
         }
+        QCOMPARE(page(QStringLiteral("testpoint")).title, QStringLiteral("TestPoint Struct"));
         const Page settings = page(QStringLiteral("outer-testns-settings"));
         QCOMPARE(settings.title, QStringLiteral("Outer::TestNs::Settings Struct"));
         QVERIFY(settings.classInfo);

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Joseph Crowell <joseph.w.crowell@gmail.com> -->
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Test fixture shaped like QDoc 6.11's DocBook output for a struct at global scope. -->
+<db:article xmlns:db="http://docbook.org/ns/docbook" xmlns:xlink="http://www.w3.org/1999/xlink" version="5.2" xml:lang="en">
+<db:info>
+<db:title/>
+<db:productname>Qt</db:productname>
+<db:edition>Qt 6.31.0 Reference Documentation</db:edition>
+<db:titleabbrev>Test module</db:titleabbrev>
+<db:abstract>
+<db:para>A point.</db:para>
+</db:abstract>
+</db:info>
+<db:variablelist>
+<db:varlistentry>
+<db:term>Header</db:term>
+<db:listitem>
+<db:para>TestPoint</db:para>
+</db:listitem>
+</db:varlistentry>
+</db:variablelist>
+<db:section xml:id="member-variable-documentation">
+<db:title>Member Variable Documentation</db:title>
+<db:section xml:id="x-var">
+<db:title>int TestPoint::x</db:title>
+<db:para>The horizontal position.</db:para>
+</db:section>
+</db:section>
+</db:article>
