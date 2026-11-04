@@ -620,6 +620,33 @@ namespace {
                     .arg(QString(std::min(level + 1, 6), QLatin1Char('#')), entry.typeWord.toLower(), escape(entryTitle->text().trimmed()), page));
             result += blocks(*child, level + 2);
         }
+
+        // QDoc's module list leaves out some of the module's classes (e.g. one named like another's
+        // nested class): add them from the index, in alphabetical order.
+        const QString listed = result.join(QLatin1Char('\n'));
+        for (const IndexClass& entry : m_converter.moduleClasses(m_slug)) {
+            if (listed.contains(QStringLiteral("(%1.md)").arg(entry.page))) {
+                continue;
+            }
+            QString brief = entry.brief.trimmed();
+            if (!brief.isEmpty() && !brief.endsWith(QLatin1Char('.')) && !brief.endsWith(QLatin1Char('!')) && !brief.endsWith(QLatin1Char('?'))) {
+                brief += QLatin1Char('.');
+            }
+            const QString line = QStringLiteral("- [%1](%2.md)").arg(escape(entry.fullName), entry.page) + (brief.isEmpty() ? QString() : QStringLiteral(": ") + escape(brief));
+            auto list = std::find_if(result.begin(), result.end(), [](const QString& block) {
+                return block.startsWith(QLatin1String("- ["));
+            });
+            if (list == result.end()) {
+                result.append(line);
+                continue;
+            }
+            QStringList lines = list->split(QLatin1Char('\n'));
+            auto after = std::find_if(lines.begin(), lines.end(), [&](const QString& existing) {
+                return existing.startsWith(QLatin1String("- [")) && existing.mid(3).compare(line.mid(3), Qt::CaseInsensitive) > 0;
+            });
+            lines.insert(after, line);
+            *list = lines.join(QLatin1Char('\n'));
+        }
         return result;
     }
 
@@ -938,6 +965,56 @@ std::optional<std::pair<QString, IndexAggregate>> Converter::aggregatePage(const
         }
     }
     return found;
+}
+
+std::optional<QHash<QString, QList<IndexClass>>> Converter::indexModuleClasses(const QByteArray& xml, QString* error)
+{
+    static const QStringList hidden{QStringLiteral("deprecated"), QStringLiteral("internal"), QStringLiteral("ignored"), QStringLiteral("dontdocument")};
+    QHash<QString, QString> modulePages;
+    QList<std::pair<QString, IndexClass>> classes;
+    QXmlStreamReader reader(xml);
+    while (!reader.atEnd()) {
+        if (reader.readNext() != QXmlStreamReader::StartElement) {
+            continue;
+        }
+        const QStringView name = reader.name();
+        const QXmlStreamAttributes attributes = reader.attributes();
+        const QString href = attributes.value(QLatin1String("href")).toString();
+        if (!href.endsWith(QLatin1String(".html")) || href.contains(QLatin1Char('#')) || href.contains(QLatin1Char('/'))) {
+            continue;
+        }
+        if (name == QLatin1String("module")) {
+            modulePages.insert(attributes.value(QLatin1String("name")).toString(), href.chopped(5));
+        } else if ((name == QLatin1String("class") || name == QLatin1String("struct") || name == QLatin1String("union"))
+            && attributes.value(QLatin1String("documented")) == QLatin1String("true")
+            && !hidden.contains(attributes.value(QLatin1String("status")).toString())) {
+            const QString fullName = attributes.hasAttribute(QLatin1String("fullname")) ? attributes.value(QLatin1String("fullname")).toString()
+                                                                                        : attributes.value(QLatin1String("name")).toString();
+            classes.append({attributes.value(QLatin1String("module")).toString(),
+                IndexClass{fullName, href.chopped(5), attributes.value(QLatin1String("brief")).toString()}});
+        }
+    }
+    if (reader.hasError()) {
+        *error = QStringLiteral("%1 (line %2)").arg(reader.errorString()).arg(reader.lineNumber());
+        return std::nullopt;
+    }
+    QHash<QString, QList<IndexClass>> result;
+    for (const auto& [module, entry] : std::as_const(classes)) {
+        if (modulePages.contains(module)) {
+            result[modulePages.value(module)].append(entry);
+        }
+    }
+    return result;
+}
+
+void Converter::setIndexModuleClasses(QHash<QString, QList<IndexClass>> classes)
+{
+    m_moduleClasses = std::move(classes);
+}
+
+QList<IndexClass> Converter::moduleClasses(const QString& moduleSlug) const
+{
+    return m_moduleClasses.value(moduleSlug);
 }
 
 QString Converter::resolveLink(const QString& fromSlug, const PageAnchors& own, const QString& href) const

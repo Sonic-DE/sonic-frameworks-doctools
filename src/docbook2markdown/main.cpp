@@ -153,12 +153,15 @@ int main(int argc, char** argv)
             return 1;
         }
         QString error;
-        const auto aggregates = DocBook2Markdown::Converter::indexAggregates(index.readAll(), &error);
-        if (!aggregates) {
+        const QByteArray xml = index.readAll();
+        const auto aggregates = DocBook2Markdown::Converter::indexAggregates(xml, &error);
+        const auto classes = aggregates ? DocBook2Markdown::Converter::indexModuleClasses(xml, &error) : std::nullopt;
+        if (!classes) {
             sonicCritical() << "Can't read" << index.fileName() << ":" << error;
             return 1;
         }
         converter.setIndexAggregates(*aggregates);
+        converter.setIndexModuleClasses(*classes);
     }
     QList<DocBook2Markdown::Page> pages;
     for (const QString& name : std::as_const(files)) {
