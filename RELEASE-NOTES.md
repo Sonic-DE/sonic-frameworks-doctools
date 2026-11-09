@@ -2,7 +2,7 @@
 
 Sonic Frameworks Doctools builds the help manuals that come with SonicDE apps.
 
-## Unreleased
+## 6.31.0.1 (2026-11-10)
 
 - New tool, `docbook2markdown6`: turns the reference documentation of SonicDE's libraries into pages for the SonicDE website, laid out like Qt's own reference (class pages with their requirements, summaries and member documentation, and module pages), with links to Qt's documentation for Qt types. Several libraries combine into one reference with a page listing them all. As on Qt's site, each class also gets a list of all its members, including inherited ones, and a separate page for its deprecated members, and QML types are listed apart from C++ classes.
 - The help-manual tools now report their messages the SonicDE way, and also to the system journal where one runs. Their errors still appear in the build output, so a failing manual build shows why.
