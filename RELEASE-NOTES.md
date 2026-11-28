@@ -9,11 +9,11 @@ Sonic Frameworks Doctools builds the help manuals that come with SonicDE apps.
 
 ## 6.31.0 (2026-10-20)
 
-- Behind the scenes: version update.
+No SonicDE-specific changes in this release; it brings the package up to date with upstream.
 
 ## 6.30.0 (2026-09-12)
 
-- Behind the scenes: version update.
+No SonicDE-specific changes in this release; it brings the package up to date with upstream.
 
 ## 6.29.0 (2026-08-07)
 
